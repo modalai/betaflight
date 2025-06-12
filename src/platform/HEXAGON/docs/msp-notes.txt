@@ -1,0 +1,37 @@
+
+mspSerialInit
+	mspSerialAllocatePorts
+		findSerialPortConfig(FUNCTION_MSP)
+		openSerialPort
+		isSerialPortShared
+
+typedef struct mspPort_s {
+    struct serialPort_s *port; // null when port unused.
+    timeMs_t lastActivityMs;
+    mspPendingSystemRequest_e pendingRequest;
+    mspPortState_e portState;
+    mspPacketState_e packetState;
+    mspPacketType_e packetType;
+    uint8_t inBuf[MSP_PORT_INBUF_SIZE];
+    uint16_t cmdMSP;
+    uint8_t cmdFlags;
+    mspVersion_e mspVersion;
+    uint_fast16_t offset;
+    uint_fast16_t dataSize;
+    uint8_t checksum1;
+    uint8_t checksum2;
+    bool sharedWithTelemetry;
+    mspDescriptor_t descriptor;
+} mspPort_t;
+
+
+
+
+mspSerialProcess
+	serialRxBytesWaiting
+	serialRead
+
+
+serialConfig()->reboot_character
+
+USE_CLI
