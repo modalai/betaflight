@@ -291,7 +291,6 @@ COMMON_SRC += \
             drivers/serial_uart.c \
             drivers/accgyro/accgyro_mpu6050.c \
             drivers/accgyro/accgyro_mpu6500.c \
-            drivers/accgyro/accgyro_mpu.c \
             drivers/accgyro/accgyro_spi_bmi160.c \
             drivers/accgyro/accgyro_spi_bmi270.c \
             drivers/accgyro/accgyro_spi_icm20649.c \
