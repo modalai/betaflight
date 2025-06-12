@@ -216,8 +216,10 @@
 #define USE_VTX_RTC6705
 #endif
 
+#if !defined(HEXAGON)
 #ifndef USE_DSHOT
 #undef USE_ESC_SENSOR
+#endif
 #endif
 
 #ifndef USE_ESC_SENSOR
