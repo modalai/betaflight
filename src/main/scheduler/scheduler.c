@@ -20,6 +20,7 @@
 
 #define SRC_MAIN_SCHEDULER_C_
 
+#include <stdio.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -529,6 +530,7 @@ FAST_CODE void scheduler(void)
              * task is non-deterministic
              * Recover as best we can, advancing scheduling by a whole number of cycles
              */
+            printf("------ GYRO LOOP OVERRUN --------");
             nextTargetCycles += desiredPeriodCycles * (1 + (schedLoopRemainingCycles / -desiredPeriodCycles));
             schedLoopRemainingCycles = cmpTimeCycles(nextTargetCycles, nowCycles);
         }
