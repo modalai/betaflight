@@ -28,6 +28,7 @@
 #define IOCFG_IPU           0
 #define IOCFG_IN_FLOATING   0
 
+#define I2CDEV_COUNT        0
 #define SPIDEV_COUNT        1
 
 #define SERIAL_TRAIT_PIN_CONFIG 0

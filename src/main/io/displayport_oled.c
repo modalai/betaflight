@@ -47,8 +47,11 @@ static int oledRelease(displayPort_t *displayPort)
 static int oledClearScreen(displayPort_t *displayPort, displayClearOption_e options)
 {
     UNUSED(options);
-
+#if !defined(USE_I2C_OLED_DISPLAY)
+	UNUSED(displayPort);
+#else
     i2c_OLED_clear_display_quick(displayPort->device);
+#endif
     return 0;
 }
 
@@ -67,8 +70,15 @@ static int oledWriteString(displayPort_t *displayPort, uint8_t x, uint8_t y, uin
 {
     UNUSED(attr);
 
+#if !defined(USE_I2C_OLED_DISPLAY)
+	UNUSED(displayPort);
+	UNUSED(x);
+	UNUSED(y);
+	UNUSED(s);
+#else
     i2c_OLED_set_xy(displayPort->device, x, y);
     i2c_OLED_send_string(displayPort->device, s);
+#endif
     return 0;
 }
 
@@ -76,8 +86,15 @@ static int oledWriteChar(displayPort_t *displayPort, uint8_t x, uint8_t y, uint8
 {
     UNUSED(attr);
 
+#if !defined(USE_I2C_OLED_DISPLAY)
+	UNUSED(displayPort);
+	UNUSED(x);
+	UNUSED(y);
+	UNUSED(c);
+#else
     i2c_OLED_set_xy(displayPort->device, x, y);
     i2c_OLED_send_char(displayPort->device, c);
+#endif
     return 0;
 }
 

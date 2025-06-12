@@ -30,7 +30,7 @@
 #include "/opt/hexagon-sdk/4.1.0.4-lite/rtos/qurt/computev66/include/qurt/qurt_timer.h"
 
 
-#define USE_I2C_OLED_DISPLAY
+#undef USE_I2C_OLED_DISPLAY
 
 #define TARGET_BOARD_IDENTIFIER "HEXAGON"
 
@@ -193,7 +193,10 @@ extern size_t strnlen(const char s[], size_t maxlen);
 #undef USE_SERIAL_4WAY_BLHELI_BOOTLOADER
 #undef USE_SERIAL_4WAY_SK_BOOTLOADER
 
-#define USE_I2C
+#define PLATFORM_NO_LIBC 0
+
+// #define USE_I2C
+#undef USE_I2C
 #define USE_SPI
 #define USE_SPI_DEVICE_1
 
