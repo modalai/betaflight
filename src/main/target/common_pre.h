@@ -69,7 +69,7 @@
 #define USE_IMU_CALC
 
 // all the settings for classic build
-#if !defined(CLOUD_BUILD) && !defined(SITL)
+#if !defined(CLOUD_BUILD) && !defined(SITL) && !defined(HEXAGON)
 
 // if no board config is provided, include all drivers
 #if !defined(USE_CONFIG)
