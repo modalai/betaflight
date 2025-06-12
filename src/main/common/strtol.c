@@ -130,7 +130,9 @@ unsigned long strtoul(const char * str, char ** endptr, int base)
 }
 #endif
 
+#if !defined(HEXAGON)
 int atoi(const char *str)
 {
     return strtol(str, NULL, 10);
 }
+#endif

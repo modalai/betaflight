@@ -32,6 +32,8 @@ __attribute__( ( always_inline ) ) static inline void __set_BASEPRI_nb(uint32_t 
 {
 #if !defined(HEXAGON)
    __ASM volatile ("\tMSR basepri, %0\n" : : "r" (basePri) );
+#else
+   (void) basePri;
 #endif
 }
 
@@ -40,6 +42,8 @@ __attribute__( ( always_inline ) ) static inline void __set_BASEPRI_MAX_nb(uint3
 {
 #if !defined(HEXAGON)
    __ASM volatile ("\tMSR basepri_max, %0\n" : : "r" (basePri) );
+#else
+   (void) basePri;
 #endif
 }
 

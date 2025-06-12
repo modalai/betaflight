@@ -101,7 +101,8 @@ $(info In Hexagon makefile)
 #                    $(LIB_MAIN_DIR)/HEXAGONV66/Drivers/CMSIS/Device/ST/HEXAGONV66xx/Include \
 #                    $(TARGET_PLATFORM_DIR)/vcp_hal
 INCLUDE_DIRS    := $(INCLUDE_DIRS) \
-                   $(TARGET_PLATFORM_DIR)
+                   $(TARGET_PLATFORM_DIR) \
+				   $(TARGET_PLATFORM_DIR)/include
 # 
 # #Flags
 # # ARCH_FLAGS      = -mthumb -mcpu=cortex-m7 -mfloat-abi=hard -mfpu=fpv5-sp-d16 -fsingle-precision-constant
@@ -128,9 +129,11 @@ MCU_FLASH_SIZE	:= 8192
 #             HEXAGON/vcp_hal/usbd_cdc_interface.c \
 #             HEXAGON/serial_usb_vcp.c \
 #             drivers/usb_io.c
-# 
+#
+ 
+#             drivers/bus_i2c_config.c \
+
 MCU_COMMON_SRC = \
-             drivers/bus_i2c_config.c \
              HEXAGON/bus_i2c_hexagon.c \
              HEXAGON/bus_i2c_hexagon_init.c \
              HEXAGON/audio_hexagon.c \
