@@ -33,7 +33,7 @@
 #include "drivers/bus_spi_impl.h"
 #include "drivers/dma.h"
 #include "drivers/io.h"
-#include "drivers/rcc.h"
+// #include "drivers/rcc.h"
 #include "pg/bus_spi.h"
 
 #include "sl_client.h"
@@ -168,4 +168,28 @@ uint16_t spiCalculateDivider(uint32_t freq)
 	// printf("In spiCalculateDivider");
 	(void) freq;
 	return 1;
+}
+
+void spiInternalInitStream(const extDevice_t *dev, bool preInit)
+{
+	(void) dev;
+	(void) preInit;
+	printf("In spiInternalInitStream");
+	printf("In spiInternalInitStream");
+}
+
+void spiInternalStartDMA(const extDevice_t *dev)
+{
+	(void) dev;
+	printf("In spiInternalStartDMA");
+}
+
+bool spiInternalReadWriteBufPolled(SPI_TypeDef *instance, const uint8_t *txData, uint8_t *rxData, int len)
+{
+	(void) instance;
+	(void) txData;
+	(void) rxData;
+	(void) len;
+	printf("In spiInternalReadWriteBufPolled");
+	return false;
 }
