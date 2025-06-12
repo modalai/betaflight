@@ -30,13 +30,17 @@
 // set BASEPRI register, do not create memory barrier
 __attribute__( ( always_inline ) ) static inline void __set_BASEPRI_nb(uint32_t basePri)
 {
+#if !defined(HEXAGON)
    __ASM volatile ("\tMSR basepri, %0\n" : : "r" (basePri) );
+#endif
 }
 
 // set BASEPRI_MAX register, do not create memory barrier
 __attribute__( ( always_inline ) ) static inline void __set_BASEPRI_MAX_nb(uint32_t basePri)
 {
+#if !defined(HEXAGON)
    __ASM volatile ("\tMSR basepri_max, %0\n" : : "r" (basePri) );
+#endif
 }
 
 #endif
