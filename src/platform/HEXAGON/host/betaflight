@@ -1,0 +1,164 @@
+#!/usr/bin/python3
+
+import os
+import stat
+import sys
+import time
+from ctypes import *
+import socket
+import threading
+
+rebooting = False
+
+def receive_data():
+    global server_connection
+    global rebooting
+    while True:
+        if server_connection:
+            try:
+                data = server_connection.recv(1024)  # Buffer size is 1024 bytes
+                if data:
+                    print(f"Received {len(data)} bytes from socket")
+                    if not rebooting:
+                        betaflight.slpi_link_send(data, c_ulong(len(data)))
+                else:
+                    server_connection.close()
+                    server_connection = None
+            except Exception as e:
+                print(f"Error receiving data: {e}")
+                break
+        else:
+            try:
+                time.sleep(0.1)
+            except:
+                print(f"Time sleep failed")
+
+def bytearray_to_const_void_ptr(data: bytearray) -> c_void_p:
+    """Converts a bytearray to a ctypes const void pointer."""
+    arr = (c_ubyte * len(data)).from_buffer(data)
+    ptr = cast(addressof(arr), c_void_p)
+
+    return ptr
+
+def py_cb_func(data, len):
+    global server_connection
+    global rebooting
+    global pympa
+    global betaflight
+    global cb_func
+
+    # print('Got data callback')
+
+    data_array = cast(data, POINTER(c_ubyte))
+    if data_array[0] == 0x5A:
+        print("Got MSP data for configurator: " + str(len) + " bytes")
+        binary_data = bytearray(len-1)
+        for i in range(1,len):
+            binary_data[i-1] = data_array[i]
+
+        print(f"Sending {len - 1} bytes to socket")
+        # print(binary_data)
+
+        if server_connection:
+            try:
+                server_connection.sendall(binary_data)
+            except:
+                print("Socket sendall failed")
+    elif data_array[0] == 0xA5:
+        # print("Got OSD data packet: " + str(len) + " bytes")
+        binary_data = bytearray(len-1)
+        for i in range(1,len):
+            binary_data[i-1] = data_array[i]
+        pympa.pipe_server_write(0, bytearray_to_const_void_ptr(binary_data), len-1);
+    elif data_array[0] == 0x42:
+        if not rebooting:
+            print('Got reboot command')
+            rebooting = True
+            # Reset SLPI
+            betaflight.slpi_link_reset(None)
+            # Wait for SLPI to reboot
+            time.sleep(4)
+            print('Calling slpi_link_init to re-initialize')
+            result = betaflight.slpi_link_init(False, cb_func, b'betaflight.so')
+            print('slpi_link_init returned: ' + str(result))
+            rebooting = False
+        # else:
+        #     print("Got duplicate reboot command while rebooting")
+    else:
+        print("Got unknown data packet" + str(data_array[0]))
+
+#### MAIN ####
+
+server_connection = None
+
+# Set up OSD MPA server pipe
+pympa = CDLL("libmodal_pipe.so")
+
+class PIPE_INFO(Structure):
+    _fields_ = [("name", c_char * 32),
+                ("location", c_char * 64),
+                ("type", c_char * 32),
+                ("server_name", c_char * 32),
+                ("size_bytes", c_int),
+                ("server_pid", c_int)]
+
+info = PIPE_INFO()
+info.name = b'msp_osd'
+info.type = b'msp_dp_cmd_t'
+info.server_name = b'betaflight'
+info.size_bytes = 4096
+info.server_pid = 0
+
+success = pympa.pipe_server_create(0, info, 0);
+if success == -1:
+    print('ERROR: Could not create OSD MPA server pipe')
+    sys.exit(-1)
+
+betaflight = CDLL('libslpi_link.so.1')
+
+# typedef void (*slpi_link_cb)(const uint8_t *data, uint32_t length_in_bytes);
+CBFUNC = CFUNCTYPE(None, POINTER(c_ubyte), c_ulong)
+cb_func = CBFUNC(py_cb_func)
+
+print('Calling slpi_link_init')
+
+# int slpi_link_init(bool enable_debug_messages, slpi_link_cb callback, const char *library_name);
+result = betaflight.slpi_link_init(False, cb_func, b'betaflight.so')
+
+print('slpi_link_init returned: ' + str(result))
+
+# Create a TCP server socket
+server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+# Bind the socket to the address and port
+server_address = ('', 8765) # '' means any available interface
+server_socket.bind(server_address)
+server_socket.listen()
+
+receive_thread = threading.Thread(target=receive_data, daemon=True)
+receive_thread.start()
+
+while True:
+    print(f"Waiting for socket connection")
+    try:
+        server_connection, addr = server_socket.accept()
+        print(f"Accepted socket connection from {addr}")
+    except:
+        print('Got unknown exception from accept')
+        break
+    while server_connection:
+        try:
+            time.sleep(0.5)
+        except:
+            print('Got unknown exception from accept')
+            break
+
+print('Exiting...')
+
+# Close OSD MSP pipe
+# pympa_close_pub(mpa_channel)
+pympa.pipe_server_close(0)
+
+# Reset SLPI
+betaflight.slpi_link_reset(None)
+
