@@ -208,7 +208,15 @@ void pgResetFn_serialConfig(serialConfig_t *serialConfig)
         pCfg->blackbox_baudrateIndex = BAUD_115200;
     }
 
+#if !defined(HEXAGON)
     serialConfig->portConfigs[0].functionMask = FUNCTION_MSP;
+    serialConfig->portConfigs[0].functionMask = FUNCTION_NONE;
+#else
+    serialPortConfig_t *blackboxConfig = serialFindPortConfigurationMutable(SERIAL_PORT_UART8);
+    if (blackboxConfig) {
+        blackboxConfig->functionMask = FUNCTION_BLACKBOX;
+    }
+#endif
 
 #ifdef MSP_UART
     serialPortConfig_t *uart2Config = serialFindPortConfigurationMutable(MSP_UART);
@@ -403,9 +411,11 @@ serialPort_t *findSharedSerialPort(uint16_t functionMask, serialPortFunction_e s
 }
 
 #ifdef USE_TELEMETRY
-#define ALL_FUNCTIONS_SHARABLE_WITH_MSP (FUNCTION_BLACKBOX | TELEMETRY_PORT_FUNCTIONS_MASK | FUNCTION_VTX_MSP)
+// #define ALL_FUNCTIONS_SHARABLE_WITH_MSP (FUNCTION_BLACKBOX | TELEMETRY_PORT_FUNCTIONS_MASK | FUNCTION_VTX_MSP)
+#define ALL_FUNCTIONS_SHARABLE_WITH_MSP (TELEMETRY_PORT_FUNCTIONS_MASK | FUNCTION_VTX_MSP)
 #else
-#define ALL_FUNCTIONS_SHARABLE_WITH_MSP (FUNCTION_BLACKBOX | FUNCTION_VTX_MSP)
+// #define ALL_FUNCTIONS_SHARABLE_WITH_MSP (FUNCTION_BLACKBOX | FUNCTION_VTX_MSP)
+#define ALL_FUNCTIONS_SHARABLE_WITH_MSP (FUNCTION_VTX_MSP)
 #endif
 
 bool isSerialConfigValid(serialConfig_t *serialConfigToCheck)
