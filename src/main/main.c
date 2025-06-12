@@ -29,7 +29,7 @@
 
 void run(void);
 
-int main(int argc, char * argv[])
+int betaflight_main(int argc, char * argv[])
 {
 #ifdef SIMULATOR_BUILD
     targetParseArgs(argc, argv);
@@ -42,6 +42,11 @@ int main(int argc, char * argv[])
     run();
 
     return 0;
+}
+
+int main(int argc, char * argv[])
+{
+    return betaflight_main(argc, argv);
 }
 
 void FAST_CODE run(void)
