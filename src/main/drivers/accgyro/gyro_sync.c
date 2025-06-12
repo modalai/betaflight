@@ -90,8 +90,13 @@ uint16_t gyroSetSampleRate(gyroDev_t *gyro)
             accSampleRateHz = 1600;
             break;
         default:
+#if !defined(HEXAGON)
             gyro->gyroRateKHz = GYRO_RATE_8_kHz;
             gyroSampleRateHz = 8000;
+#else
+            gyro->gyroRateKHz = GYRO_RATE_2_kHz;
+            gyroSampleRateHz = 2000;
+#endif
             accSampleRateHz = 1000;
             break;
     }

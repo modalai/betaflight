@@ -81,6 +81,9 @@ typedef enum {
 
 typedef enum {
     GYRO_RATE_1_kHz,
+#if defined(HEXAGON)
+    GYRO_RATE_2_kHz,
+#endif
     GYRO_RATE_1100_Hz,
     GYRO_RATE_3200_Hz,
     GYRO_RATE_6400_Hz,
