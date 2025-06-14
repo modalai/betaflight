@@ -140,7 +140,6 @@ MCU_COMMON_SRC = \
              HEXAGON/bus_spi_hexagon.c \
              HEXAGON/serial_uart_hexagon.c \
              HEXAGON/motor_hexagon.c \
-             drivers/accgyro/accgyro_mpu.c \
              drivers/bus_spi_config.c \
              HEXAGON/unresolved.c \
              HEXAGON/exti.c \
