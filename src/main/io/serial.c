@@ -208,11 +208,10 @@ void pgResetFn_serialConfig(serialConfig_t *serialConfig)
         pCfg->blackbox_baudrateIndex = BAUD_115200;
     }
 
-#if !defined(HEXAGON)
     serialConfig->portConfigs[0].functionMask = FUNCTION_MSP;
-    serialConfig->portConfigs[0].functionMask = FUNCTION_NONE;
-#else
-    serialPortConfig_t *blackboxConfig = serialFindPortConfigurationMutable(SERIAL_PORT_UART8);
+
+#if defined(HEXAGON)
+    serialPortConfig_t *blackboxConfig = serialFindPortConfigurationMutable(SERIAL_PORT_UART7);
     if (blackboxConfig) {
         blackboxConfig->functionMask = FUNCTION_BLACKBOX;
     }

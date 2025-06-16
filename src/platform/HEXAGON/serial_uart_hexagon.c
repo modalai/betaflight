@@ -48,73 +48,6 @@
 
 #include "sl_client.h"
 
-// Blackbox binary log file support
-#define MAX_LOG_BUFFERS 10
-#define MAX_LOG_BUFFER_SIZE 1024
-static uint8_t log_buffers[MAX_LOG_BUFFERS][MAX_LOG_BUFFER_SIZE];
-static int log_buffer;
-static int log_buffer_index;
-static int log_write_buffer;
-static bool logging_initialized;
-static bool log_data_received;
-static const char dir_path[] = "/data/betaflight";
-static const char logfile[] = "log.bin";
-static char full_log_path[128];
-
-// Called by the SLPI LINK server when there is a new message for us from host side
-int slpi_link_client_receive(const uint8_t *data, int data_len_in_bytes) __attribute__ ((visibility ("default")));
-
-// Receive buffer support for MSP data coming from betaflight configurator
-#define VIRTUAL_RX_BUFFER_LEN 1024
-static uint8_t virtual_rx_buffer[VIRTUAL_RX_BUFFER_LEN];
-static uint32_t _rx_write = 0;
-static uint32_t _rx_read = 0;
-static pthread_mutex_t _lock = PTHREAD_MUTEX_INITIALIZER;
-
-int slpi_link_client_receive(const uint8_t *data, int data_len_in_bytes)
-{
-	// printf("Got %d bytes from host side. First 3 bytes: 0x%0.2x 0x%0.2x 0x%0.2x",
-	// 		data_len_in_bytes, data[0], data[1], data[2]);
-
-	bool saved_data = true;
-	pthread_mutex_lock(&_lock);
-	if (_rx_write + data_len_in_bytes < VIRTUAL_RX_BUFFER_LEN) {
-		memcpy(&virtual_rx_buffer[_rx_write], data, data_len_in_bytes);
-		_rx_write += data_len_in_bytes;
-	} else {
-		saved_data = false;
-	}
-	pthread_mutex_unlock(&_lock);
-
-	if (!saved_data) {
-		printf("ERROR: Dropped %d incoming bytes on virtual serial port", data_len_in_bytes);
-	// } else {
-	// 	printf("Saved %d incoming bytes on virtual serial port", data_len_in_bytes);
-	}
-
-    // if (data_len_in_bytes < QURT_RPC_MSG_HEADER_LEN) {
-    //     return 0;
-    // }
-    // const auto *msg = (struct qurt_rpc_msg *)data;
-    // if (msg->data_length + QURT_RPC_MSG_HEADER_LEN != data_len_in_bytes) {
-    //     return 0;
-    // }
-	// 
-    // switch (msg->msg_id) {
-    // case QURT_MSG_ID_MAVLINK_MSG: {
-    //     if ((msg->inst < MAX_MAVLINK_INSTANCES) && (mav_cb[msg->inst])) {
-    //         mav_cb[msg->inst](msg, mav_cb_ptr[msg->inst]);
-    //     }
-    //     break;
-    // }
-    // default:
-    //     HAP_PRINTF("Got unknown message id %d", msg->msg_id);
-    //     break;
-    // }
-
-    return 0;
-}
-
 USART_TypeDef hexagon_uart[NUM_HEXAGON_UART];
 
 const uartHardware_t uartHardware[UARTDEV_COUNT] = {
@@ -165,123 +98,179 @@ const uartHardware_t uartHardware[UARTDEV_COUNT] = {
         .rxBuffer = uart1RxBuffer,
         .txBufferSize = sizeof(uart1TxBuffer),
         .rxBufferSize = sizeof(uart1RxBuffer),
-	},
-    {
-        .identifier = SERIAL_PORT_UART8,
-        .reg = UART8,
-        .txBuffer = uart1TxBuffer,
-        .rxBuffer = uart1RxBuffer,
-        .txBufferSize = sizeof(uart1TxBuffer),
-        .rxBufferSize = sizeof(uart1RxBuffer),
 	}
 };
 
-uint32_t hexagonSerialTotalRxWaiting(const serialPort_t *instance) {
+typedef enum {
+	UART_FUNCTION_UNKNOWN,
+	UART_FUNCTION_HW,
+	UART_FUNCTION_MSP,
+	UART_FUNCTION_OSD,
+	UART_FUNCTION_ESC_SENSOR,
+	UART_FUNCTION_BLACKBOX
+} hexagonUartFunction_e;
 
-	serialPortIdentifier_e port_number = instance->identifier;
+// This is how to map the three hardware ports to actual DSP QUP index
+static int hwIndexMap[3] = {2, 6, 7};
 
+// Blackbox binary log file support
+#define MAX_LOG_BUFFERS 10
+#define MAX_LOG_BUFFER_SIZE 1024
+static uint8_t log_buffers[MAX_LOG_BUFFERS][MAX_LOG_BUFFER_SIZE];
+static int log_buffer;
+static int log_buffer_index;
+static int log_write_buffer;
+static bool logging_initialized;
+static bool log_data_received;
+static const char dir_path[] = "/data/betaflight";
+static const char logfile[] = "log.bin";
+static char full_log_path[128];
+
+// Receive buffer support for MSP data coming from betaflight configurator
+#define VIRTUAL_RX_BUFFER_LEN 1024
+static uint8_t virtual_rx_buffer[VIRTUAL_RX_BUFFER_LEN];
+static uint32_t _rx_write = 0;
+static uint32_t _rx_read = 0;
+static pthread_mutex_t _lock = PTHREAD_MUTEX_INITIALIZER;
+
+// Called by the SLPI LINK server when there is a new message for us from host side
+int slpi_link_client_receive(const uint8_t *data, int data_len_in_bytes) __attribute__ ((visibility ("default")));
+
+int slpi_link_client_receive(const uint8_t *data, int data_len_in_bytes)
+{
+	// printf("Got %d bytes from host side. First 3 bytes: 0x%0.2x 0x%0.2x 0x%0.2x",
+	// 		data_len_in_bytes, data[0], data[1], data[2]);
+
+	bool saved_data = true;
+	pthread_mutex_lock(&_lock);
+	if (_rx_write + data_len_in_bytes < VIRTUAL_RX_BUFFER_LEN) {
+		memcpy(&virtual_rx_buffer[_rx_write], data, data_len_in_bytes);
+		_rx_write += data_len_in_bytes;
+	} else {
+		saved_data = false;
+	}
+	pthread_mutex_unlock(&_lock);
+
+	if (!saved_data) {
+		printf("ERROR: Dropped %d incoming bytes on virtual serial port", data_len_in_bytes);
+	// } else {
+	// 	printf("Saved %d incoming bytes on virtual serial port", data_len_in_bytes);
+	}
+
+    // if (data_len_in_bytes < QURT_RPC_MSG_HEADER_LEN) {
+    //     return 0;
+    // }
+    // const auto *msg = (struct qurt_rpc_msg *)data;
+    // if (msg->data_length + QURT_RPC_MSG_HEADER_LEN != data_len_in_bytes) {
+    //     return 0;
+    // }
+	// 
+    // switch (msg->msg_id) {
+    // case QURT_MSG_ID_MAVLINK_MSG: {
+    //     if ((msg->inst < MAX_MAVLINK_INSTANCES) && (mav_cb[msg->inst])) {
+    //         mav_cb[msg->inst](msg, mav_cb_ptr[msg->inst]);
+    //     }
+    //     break;
+    // }
+    // default:
+    //     HAP_PRINTF("Got unknown message id %d", msg->msg_id);
+    //     break;
+    // }
+
+    return 0;
+}
+
+static int getUARTHWindex(serialPortIdentifier_e port) {
 	int hw_index = -1;
 
-	switch(port_number) {
-	case SERIAL_PORT_USART1:
-		hw_index = 0;
-		break;
+	switch (port) {
 	case SERIAL_PORT_USART2:
 		hw_index = 1;
 		break;
 	case SERIAL_PORT_USART3:
 		hw_index = 2;
 		break;
-	case SERIAL_PORT_UART4:
-		hw_index = 3;
-		break;
-	case SERIAL_PORT_UART7:
-		hw_index = 4;
-		break;
-	case SERIAL_PORT_UART8:
-		hw_index = 5;
-		break;
 	default:
-		printf("ERROR: Invalid port identifier");
+		printf("ERROR: Invalid port identifier in getUARTHWindex");
 		break;
 	}
 
+	return hw_index;
+}
+
+static hexagonUartFunction_e getUARTfunction(serialPortIdentifier_e port) {
+	hexagonUartFunction_e func = UART_FUNCTION_UNKNOWN;
+
+	switch (port) {
+	case SERIAL_PORT_USART1:
+		func = UART_FUNCTION_MSP;
+		break;
+	case SERIAL_PORT_USART2:
+		func = UART_FUNCTION_HW;
+		break;
+	case SERIAL_PORT_USART3:
+		func = UART_FUNCTION_HW;
+		break;
+	case SERIAL_PORT_UART4:
+		func = UART_FUNCTION_ESC_SENSOR;
+		break;
+	case SERIAL_PORT_UART5:
+		func = UART_FUNCTION_OSD;
+		break;
+	case SERIAL_PORT_UART7:
+		func = UART_FUNCTION_BLACKBOX;
+		break;
+	default:
+		printf("ERROR: Invalid port identifier in getUARTfunction");
+		break;
+	}
+
+	return func;
+}
+
+uint32_t hexagonSerialTotalRxWaiting(const serialPort_t *instance) {
+	serialPortIdentifier_e port_number = instance->identifier;
+	hexagonUartFunction_e uartFunction = getUARTfunction(port_number);
 	uint32_t bytes_waiting = 0;
 
-	if ((hw_index > -1) && (hw_index < 5)) {
-		if (hw_index == 3) {
-			// Virtual port
-			pthread_mutex_lock(&_lock);
-			bytes_waiting = _rx_write - _rx_read;
-			pthread_mutex_unlock(&_lock);
-			// printf("%lu total bytes waiting on virtual serial port to read", bytes_waiting);
-		} else if ((hw_index == 4) || (hw_index == 5)) {
-			// printf("Checking RX bytes waiting for OSD serial port");
-		} else {
+	if (uartFunction == UART_FUNCTION_MSP) {
+		// Virtual port
+		pthread_mutex_lock(&_lock);
+		bytes_waiting = _rx_write - _rx_read;
+		pthread_mutex_unlock(&_lock);
+		// printf("%lu total bytes waiting on virtual serial port to read", bytes_waiting);
+	} else if (uartFunction == UART_FUNCTION_HW) {
+		int hw_index = getUARTHWindex(port_number);
+		if (hw_index != -1) {
 			(void) sl_client_uart_rx_available(uartHardware[hw_index].reg->fd, &bytes_waiting);
 		}
-	} else {
-		printf("ERROR: Invalid port number %u", port_number);
 	}
 
 	return bytes_waiting;
 }
 
 uint8_t hexagonSerialRead(serialPort_t *instance) {
-
 	serialPortIdentifier_e port_number = instance->identifier;
-
-	int hw_index = -1;
-
-	switch(port_number) {
-	case SERIAL_PORT_USART1:
-		hw_index = 0;
-		break;
-	case SERIAL_PORT_USART2:
-		hw_index = 1;
-		break;
-	case SERIAL_PORT_USART3:
-		hw_index = 2;
-		break;
-	case SERIAL_PORT_UART4:
-		hw_index = 3;
-		break;
-	case SERIAL_PORT_UART7:
-		hw_index = 4;
-		break;
-	case SERIAL_PORT_UART8:
-		hw_index = 4;
-		break;
-	default:
-		printf("ERROR: Invalid port identifier");
-		break;
-	}
-
+	hexagonUartFunction_e uartFunction = getUARTfunction(port_number);
 	uint8_t byte_data = 0;
 
-	if ((hw_index > -1) && (hw_index < 5)) {
-		if (hw_index == 3) {
-			// Virtual port
-			pthread_mutex_lock(&_lock);
-			if (_rx_write > _rx_read) {
-				byte_data = virtual_rx_buffer[_rx_read++];
-				// If read is all caught up then put indexes back to beginning of buffer.
-				if (_rx_read == _rx_write) {
-					_rx_read = 0;
-					_rx_write = 0;
-				}
+	if (uartFunction == UART_FUNCTION_MSP) {
+		pthread_mutex_lock(&_lock);
+		if (_rx_write > _rx_read) {
+			byte_data = virtual_rx_buffer[_rx_read++];
+			// If read is all caught up then put indexes back to beginning of buffer.
+			if (_rx_read == _rx_write) {
+				_rx_read = 0;
+				_rx_write = 0;
 			}
-			pthread_mutex_unlock(&_lock);
-			// printf("Reading a byte from virtual serial port buffer");
-		} else if (hw_index == 4) {
-			printf("Trying to read on OSD MSP port");
-		} else if (hw_index == 5) {
-			printf("Trying to read on Blackbox port");
-		} else {
+		}
+		pthread_mutex_unlock(&_lock);
+		// printf("Reading a byte from virtual serial port buffer");
+	} else if (uartFunction == UART_FUNCTION_HW) {
+		int hw_index = getUARTHWindex(port_number);
+		if (hw_index != -1) {
 			(void) sl_client_uart_read(uartHardware[hw_index].reg->fd, (char*) &byte_data, 1);
 		}
-	} else {
-		printf("ERROR: Invalid port number %u", port_number);
 	}
 
 	return byte_data;
@@ -407,9 +396,9 @@ void hexagonStartBuf(serialPort_t *instance) {
 }
 
 void hexagonEndBuf(serialPort_t *instance) {
-	serialPortIdentifier_e port_number = instance->identifier;
+	hexagonUartFunction_e uartFunction = getUARTfunction(instance->identifier);
 
-	if (port_number == SERIAL_PORT_UART7) {
+	if (uartFunction == UART_FUNCTION_OSD) {
 		if (osdTxBufferIndex + osdPacketBufferIndex > 4096) {
 			printf("ERROR: OSD transmit buffer overflow");
 		} else {
@@ -426,65 +415,33 @@ void hexagonEndBuf(serialPort_t *instance) {
 
 void hexagonWriteBuf(serialPort_t *instance, const void *data, int count) {
 	serialPortIdentifier_e port_number = instance->identifier;
+	hexagonUartFunction_e uartFunction = getUARTfunction(port_number);
 
-	int hw_index = -1;
-
-	switch(port_number) {
-	case SERIAL_PORT_USART1:
-		hw_index = 0;
-		break;
-	case SERIAL_PORT_USART2:
-		hw_index = 1;
-		break;
-	case SERIAL_PORT_USART3:
-		hw_index = 2;
-		break;
-	case SERIAL_PORT_UART4:
-		hw_index = 3;
-		break;
-	case SERIAL_PORT_UART7:
-		hw_index = 4;
-		break;
-	case SERIAL_PORT_UART8:
-		hw_index = 5;
-		break;
-	default:
-		printf("ERROR: Invalid port identifier");
-		break;
-	}
-
-	if ((hw_index > -1) && (hw_index < 5)) {
-		if (hw_index == 3) {
-			if (mspTxBufferIndex + count > 4096) {
-				printf("ERROR: MSP tx buffer overflow");
-			} else {
-				pthread_mutex_lock(&msp_mutex);
-				memcpy(&mspTxBuffer[mspTxBufferIndex], data, count);
-				mspTxBufferIndex += count;
-				mspFlush = true;
-				pthread_mutex_unlock(&msp_mutex);
-			}
-		} else if (hw_index == 4) {
-			if (osdPacketBufferIndex + count > 256) {
-				printf("ERROR: OSD packet buffer overflow");
-			} else {
-				memcpy(&osdPacketBuffer[osdPacketBufferIndex], data, count);
-				osdPacketBufferIndex += count;
-			}
-		} else if (hw_index == 5) {
-			printf("Writing %u bytes to Blackbox", count);
+	if (uartFunction == UART_FUNCTION_MSP) {
+		if (mspTxBufferIndex + count > 4096) {
+			printf("ERROR: MSP tx buffer overflow");
 		} else {
-			(void) sl_client_uart_write(uartHardware[hw_index].reg->fd, (const char*) data, (const unsigned) count);
+			pthread_mutex_lock(&msp_mutex);
+			memcpy(&mspTxBuffer[mspTxBufferIndex], data, count);
+			mspTxBufferIndex += count;
+			mspFlush = true;
+			pthread_mutex_unlock(&msp_mutex);
 		}
-	} else {
-		printf("ERROR: Invalid port number %u", port_number);
+	} else if (uartFunction == UART_FUNCTION_OSD) {
+		if (osdPacketBufferIndex + count > 256) {
+			printf("ERROR: OSD packet buffer overflow");
+		} else {
+			memcpy(&osdPacketBuffer[osdPacketBufferIndex], data, count);
+			osdPacketBufferIndex += count;
+		}
+	} else if (uartFunction == UART_FUNCTION_HW) {
+		int hw_index = getUARTHWindex(port_number);
+		(void) sl_client_uart_write(uartHardware[hw_index].reg->fd, (const char*) data, (const unsigned) count);
 	}
 }
 
 void hexagonSerialWrite(serialPort_t *instance, uint8_t ch) {
-	serialPortIdentifier_e port_number = instance->identifier;
-
-	if (port_number == SERIAL_PORT_UART8) {
+	if (getUARTfunction(instance->identifier) == UART_FUNCTION_BLACKBOX) {
 		log_data_received = true;
 		if (log_buffer_index == MAX_LOG_BUFFER_SIZE) {
 			log_buffer_index = 0;
@@ -493,8 +450,6 @@ void hexagonSerialWrite(serialPort_t *instance, uint8_t ch) {
 		}
 		log_buffers[log_buffer][log_buffer_index] = ch;
 		log_buffer_index++;
-	} else {
-		printf("ERROR: Port %u not supported in hexagonSerialWrite", port_number);
 	}
 }
 
@@ -531,80 +486,31 @@ uartPort_t *serialUART(uartDevice_t *uartdev, uint32_t baudRate, portMode_e mode
 	(void)options;
 
     uartPort_t *uart_port = &uartdev->port;
-
 	serialPort_t serial_port = uart_port->port;
-
 	serialPortIdentifier_e port_number = serial_port.identifier;
+	hexagonUartFunction_e uartFunction = getUARTfunction(port_number);
+	int hw_index = getUARTHWindex(port_number);
+	uartHardware[hw_index].reg->fd = -1;
 
-	uint8_t sl_port_number = 0;
-	int hw_index = -1;
-	// TODO: Decide final mapping
-	switch(port_number) {
-	case SERIAL_PORT_USART1:
-		sl_port_number = 2;
-		hw_index = 0;
-		break;
-	case SERIAL_PORT_USART2:
-		sl_port_number = 6;
-		hw_index = 1;
-		break;
-	case SERIAL_PORT_USART3:
-		sl_port_number = 7;
-		hw_index = 2;
-		break;
-	case SERIAL_PORT_UART4:
-		sl_port_number = 8;
-		hw_index = 3;
-		break;
-	case SERIAL_PORT_UART5:
-		sl_port_number = 9;
-		hw_index = 4;
-		break;
-	case SERIAL_PORT_UART7:
-		sl_port_number = 10;
-		hw_index = 5;
-		break;
-	case SERIAL_PORT_UART8:
-		sl_port_number = 11;
-		hw_index = 6;
-		break;
-	default:
-		printf("ERROR: Invalid port identifier");
-		break;
-	}
-
-	if ((hw_index > -1) && (hw_index < NUM_HEXAGON_UART)) {
-		if (port_number == SERIAL_PORT_UART4) {
-			printf("Configuring MSP virtual port");
-
-		    uartHardware[hw_index].reg->fd = 3;
-		} else if (port_number == SERIAL_PORT_UART5) {
-			printf("Configuring ESC sensor virtual port");
-
-		    uartHardware[hw_index].reg->fd = 4;
-		} else if (port_number == SERIAL_PORT_UART7) {
-			printf("Configuring OSD virtual display port");
-
-		    uartHardware[hw_index].reg->fd = 5;
-		} else if (port_number == SERIAL_PORT_UART8) {
-			printf("Configuring Blackbox virtual port");
-
-		    uartHardware[hw_index].reg->fd = 6;
-		} else {
-			int fd = sl_client_config_uart(sl_port_number, baudRate);
-
-			printf("====== In serialUART. id %u port %u baudRate %lu", port_number, sl_port_number, baudRate);
-
-			uartHardware[hw_index].reg->fd = fd;
-		}
-
-		uart_port->USARTx = uartHardware[hw_index].reg;
-
-	} else {
+	if (uartFunction == UART_FUNCTION_HW) {
+		uint8_t sl_port_number = hwIndexMap[hw_index];
+		int fd = sl_client_config_uart(sl_port_number, baudRate);
+		printf("====== In serialUART. id %u port %u baudRate %lu", port_number, sl_port_number, baudRate);
+		uartHardware[hw_index].reg->fd = fd;
+	} else if (uartFunction == UART_FUNCTION_MSP) {
+		printf("Configuring MSP virtual port");
+	} else if (uartFunction == UART_FUNCTION_OSD) {
+		printf("Configuring OSD virtual display port");
+	} else if (uartFunction == UART_FUNCTION_ESC_SENSOR) {
+		printf("Configuring ESC sensor virtual port");
+	} else if (uartFunction == UART_FUNCTION_BLACKBOX) {
+		printf("Configuring Blackbox virtual port");
+	} else { // UART_FUNCTION_UNKNOWN
 		printf("ERROR: Invalid port number %u", port_number);
 		return NULL;
 	}
 
+	uart_port->USARTx = uartHardware[hw_index].reg;
 	uartdev->port.port.vTable = &hexagon_uart_vtable;
 
 	return uart_port;
@@ -613,7 +519,6 @@ uartPort_t *serialUART(uartDevice_t *uartdev, uint32_t baudRate, portMode_e mode
 void uartEnableTxInterrupt(uartPort_t *uartPort)
 {
 	int fd = uartPort->USARTx->fd;
-
 	printf("====== In uartEnableTxInterrupt, fd %d", fd);
 }
 
@@ -621,18 +526,25 @@ extern void registerTelemCallback(serialReceiveCallbackPtr cb);
 
 void uartReconfigure(uartPort_t *uartPort)
 {
-	int fd = uartPort->USARTx->fd;
+	serialPort_t serial_port = uartPort->port;
+	serialPortIdentifier_e port_number = serial_port.identifier;
+	hexagonUartFunction_e uartFunction = getUARTfunction(port_number);
 
+	int fd = uartPort->USARTx->fd;
 	printf("====== In uartReconfigure, fd %d", fd);
 
-	if (fd < 3) {
+	if (uartFunction == UART_FUNCTION_HW) {
+		int hw_index = getUARTHWindex(port_number);
+		printf("Reconfiguring HW port %d", hw_index);
     	(void) sl_client_register_uart_callback(fd, uartPort->port.rxCallback, uartPort->port.rxCallbackData);
-	} else if (fd == 4) {
+	} else if (uartFunction == UART_FUNCTION_MSP) {
+		printf("Reconfiguring MSP virtual port");
 		mspTxBuffer[0] = 0x5A;
 		mspTxBufferIndex = 1;
 		// For ESC telemetry
 		registerTelemCallback(uartPort->port.rxCallback);
-	} else if (fd == 5) {
+	} else if (uartFunction == UART_FUNCTION_OSD) {
+		printf("Reconfiguring OSD virtual display port");
 		// TODO: Perhaps move this init to somewhere else?
 		if (!tx_thread_started) {
 			osdTxBuffer[0] = 0xA5;
@@ -661,7 +573,6 @@ void uartReconfigure(uartPort_t *uartPort)
 void uartIrqHandler(uartPort_t *s)
 {
 	int fd = s->USARTx->fd;
-
 	printf("====== In uartIrqHandler, fd %d", fd);
 }
 
