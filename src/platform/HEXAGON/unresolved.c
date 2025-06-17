@@ -21,6 +21,8 @@
 #include "config/config_streamer_impl.h"
 #include "config/config_eeprom_impl.h"
 
+#include "common/time.h"
+
 // TODO: Why can't we use 806?
 //       Seems to generate math problems in scheduler with 860...
 #define HEXAGON_SYS_CLOCK_MULT 100
@@ -33,6 +35,11 @@ bool useDshotTelemetry = false;
 
 char _estack;
 char _Min_Stack_Size;
+
+void initDshotTelemetry(const timeUs_t looptimeUs)
+{
+	(void) looptimeUs;
+}
 
 const mcuTypeInfo_t *getMcuTypeInfo(void)
 {
