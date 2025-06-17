@@ -11,6 +11,7 @@
 
 #include "pg/pg.h"
 #include "drivers/serial.h"
+#include "drivers/bus_i2c.h"
 #include "drivers/io.h"
 #include "pg/bus_spi.h"
 #include "drivers/system.h"
@@ -35,6 +36,11 @@ bool useDshotTelemetry = false;
 
 char _estack;
 char _Min_Stack_Size;
+
+void i2cPinConfigure(const struct i2cConfig_s *i2cConfig)
+{
+	(void) i2cConfig;
+}
 
 void initDshotTelemetry(const timeUs_t looptimeUs)
 {
