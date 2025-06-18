@@ -48,7 +48,7 @@ static int intrCB(int int1, void* ptr1, void* ptr2) {
 
 void EXTIInit(void)
 {
-	printf("In EXTIInit");
+	// printf("In EXTIInit");
 }
 
 void EXTIHandlerInit(extiCallbackRec_t *cb, extiHandlerCallback *fn)
@@ -56,7 +56,7 @@ void EXTIHandlerInit(extiCallbackRec_t *cb, extiHandlerCallback *fn)
 	exti_cb = cb;
 	exti_fn = fn;
 
-	printf("In EXTIHandlerInit");
+	// printf("In EXTIHandlerInit");
 }
 
 void EXTIConfig(IO_t io, extiCallbackRec_t *cb, int irqPriority, ioConfig_t config, extiTrigger_t trigger)
@@ -66,19 +66,19 @@ void EXTIConfig(IO_t io, extiCallbackRec_t *cb, int irqPriority, ioConfig_t conf
 	(void) irqPriority;
 	(void) config;
 	(void) trigger;
-	printf("In EXTIConfig");
+	// printf("In EXTIConfig");
 }
 
 void EXTIRelease(IO_t io)
 {
 	(void) io;
-	printf("In EXTIRelease");
+	// printf("In EXTIRelease");
 }
 
 void EXTIEnable(IO_t io)
 {
 	(void) io;
-	printf("In EXTIEnable");
+	// printf("In EXTIEnable");
 
 	(void) sl_client_register_interrupt_callback(intrCB, NULL);
 }
@@ -86,7 +86,7 @@ void EXTIEnable(IO_t io)
 void EXTIDisable(IO_t io)
 {
 	(void) io;
-	printf("In EXTIDisable");
+	// printf("In EXTIDisable");
 }
 
 

@@ -78,12 +78,6 @@ extern int ffs(int i);
 extern char *strcasestr(const char *haystack, const char *needle);
 
 extern size_t strnlen(const char s[], size_t maxlen);
-// size_t strnlen(const char s[.maxlen], size_t maxlen);
-
-//#define SIMULATOR_ACC_SYNC
-//#define SIMULATOR_GYRO_SYNC
-//#define SIMULATOR_IMU_SYNC
-//#define SIMULATOR_GYROPID_SYNC
 
 // file name to save config
 #define EEPROM_FILENAME "/data/betaflight/eeprom.bin"
@@ -94,16 +88,10 @@ extern size_t strnlen(const char s[], size_t maxlen);
 #define U_ID_1 1
 #define U_ID_2 2
 
-#undef TASK_GYROPID_DESIRED_PERIOD
-// #define TASK_GYROPID_DESIRED_PERIOD     125
 #define TASK_GYROPID_DESIRED_PERIOD     500
 #define BRUSHLESS_MOTORS_PWM_RATE 2000
 
-
-#undef SCHEDULER_DELAY_LIMIT
 #define SCHEDULER_DELAY_LIMIT           1
-
-// #define USE_VIRTUAL_LED
 
 #undef USE_MULTI_GYRO
 #define GYRO_1_SPI_INSTANCE SPI1
@@ -138,7 +126,6 @@ extern size_t strnlen(const char s[], size_t maxlen);
 
 #define USE_SERIALRX
 #define USE_SERIALRX_CRSF
-
 
 #undef USE_DMA
 

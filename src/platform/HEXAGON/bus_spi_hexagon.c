@@ -33,7 +33,6 @@
 #include "drivers/bus_spi_impl.h"
 #include "drivers/dma.h"
 #include "drivers/io.h"
-// #include "drivers/rcc.h"
 #include "pg/bus_spi.h"
 
 #include "sl_client.h"
@@ -174,7 +173,6 @@ void spiInternalInitStream(const extDevice_t *dev, bool preInit)
 {
 	(void) dev;
 	(void) preInit;
-	printf("In spiInternalInitStream");
 	printf("In spiInternalInitStream");
 }
 

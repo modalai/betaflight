@@ -11,7 +11,6 @@
 
 #include "pg/pg.h"
 #include "drivers/serial.h"
-#include "drivers/bus_i2c.h"
 #include "drivers/io.h"
 #include "pg/bus_spi.h"
 #include "drivers/system.h"
@@ -36,11 +35,6 @@ bool useDshotTelemetry = false;
 
 char _estack;
 char _Min_Stack_Size;
-
-void i2cPinConfigure(const struct i2cConfig_s *i2cConfig)
-{
-	(void) i2cConfig;
-}
 
 void initDshotTelemetry(const timeUs_t looptimeUs)
 {
@@ -253,13 +247,6 @@ void unusedPinsInit(void)
     printf("unusedPinsInit\n");
 }
 
-// uint8_t mpuGyroReadRegister(const extDevice_t *dev, uint8_t reg)
-// {
-// 	(void) dev;
-// 	(void) reg;
-// 	return 0;
-// }
-
 void IOConfigGPIO(IO_t io, ioConfig_t cfg)
 {
     UNUSED(io);
@@ -302,52 +289,10 @@ IO_t IOGetByTag(ioTag_t tag)
 // system
 void systemInit(void)
 {
-    // int ret;
-	// 
     clock_gettime(CLOCK_MONOTONIC, &start_time);
     printf("[system]Init...\n");
-	// 
+
     SystemCoreClock = HEXAGON_SYS_CLOCK_MULT * 1e6;
-	// 
-    // if (pthread_mutex_init(&updateLock, NULL) != 0) {
-    //     printf("Create updateLock error!\n");
-    //     exit(1);
-    // }
-	// 
-    // if (pthread_mutex_init(&mainLoopLock, NULL) != 0) {
-    //     printf("Create mainLoopLock error!\n");
-    //     exit(1);
-    // }
-	// 
-    // ret = pthread_create(&tcpWorker, NULL, tcpThread, NULL);
-    // if (ret != 0) {
-    //     printf("Create tcpWorker error!\n");
-    //     exit(1);
-    // }
-	// 
-    // ret = udpInit(&pwmLink, simulator_ip, PORT_PWM, false);
-    // printf("[SITL] init PwmOut UDP link to gazebo %s:%d...%d\n", simulator_ip, PORT_PWM, ret);
-	// 
-    // ret = udpInit(&pwmRawLink, simulator_ip, PORT_PWM_RAW, false);
-    // printf("[SITL] init PwmOut UDP link to RF9 %s:%d...%d\n", simulator_ip, PORT_PWM_RAW, ret);
-	// 
-    // ret = udpInit(&stateLink, NULL, PORT_STATE, true);
-    // printf("[SITL] start UDP server @%d...%d\n", PORT_STATE, ret);
-	// 
-    // ret = udpInit(&rcLink, NULL, PORT_RC, true);
-    // printf("[SITL] start UDP server for RC input @%d...%d\n", PORT_RC, ret);
-	// 
-    // ret = pthread_create(&udpWorker, NULL, udpThread, NULL);
-    // if (ret != 0) {
-    //     printf("Create udpWorker error!\n");
-    //     exit(1);
-    // }
-	// 
-    // ret = pthread_create(&udpWorkerRC, NULL, udpRCThread, NULL);
-    // if (ret != 0) {
-    //     printf("Create udpRCThread error!\n");
-    //     exit(1);
-    // }
 }
 
 extern void hexagonReset();

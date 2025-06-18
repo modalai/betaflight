@@ -19,13 +19,6 @@
  * If not, see <http://www.gnu.org/licenses/>.
  */
 
-/*
- * Authors:
- * jflyper - Refactoring, cleanup and made pin-configurable
- * Dominic Clifton - Serial port abstraction, Separation of common STM32 code for cleanflight, various cleanups.
- * Hamasaki/Timecop - Initial baseflight code
-*/
-
 #include <stdio.h>
 #include <sys/stat.h>
 #include <stdbool.h>
@@ -40,7 +33,6 @@
 #include "common/utils.h"
 #include "drivers/inverter.h"
 #include "drivers/nvic.h"
-// #include "platform/rcc.h"
 
 #include "drivers/serial.h"
 #include "drivers/serial_uart.h"
@@ -154,26 +146,6 @@ int slpi_link_client_receive(const uint8_t *data, int data_len_in_bytes)
 	if (!saved_data) {
 		printf("ERROR: Dropped %d incoming bytes on virtual serial port", data_len_in_bytes);
 	}
-
-    // if (data_len_in_bytes < QURT_RPC_MSG_HEADER_LEN) {
-    //     return 0;
-    // }
-    // const auto *msg = (struct qurt_rpc_msg *)data;
-    // if (msg->data_length + QURT_RPC_MSG_HEADER_LEN != data_len_in_bytes) {
-    //     return 0;
-    // }
-	// 
-    // switch (msg->msg_id) {
-    // case QURT_MSG_ID_MAVLINK_MSG: {
-    //     if ((msg->inst < MAX_MAVLINK_INSTANCES) && (mav_cb[msg->inst])) {
-    //         mav_cb[msg->inst](msg, mav_cb_ptr[msg->inst]);
-    //     }
-    //     break;
-    // }
-    // default:
-    //     HAP_PRINTF("Got unknown message id %d", msg->msg_id);
-    //     break;
-    // }
 
     return 0;
 }

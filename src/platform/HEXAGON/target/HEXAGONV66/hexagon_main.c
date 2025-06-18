@@ -3,12 +3,9 @@
 #include <pthread.h>
 
 #include "platform.h"
-// #include "io/serial.h"
-// #include "common/printf_serial.h"
 
 extern void HAP_debug(const char *msg, int level, const char *filename, int line);
 
-// void HAP_printf(const char *file, int line, const char *format, ...)
 void HAP_printf(const char *format, ...)
 {
 	va_list ap;
@@ -18,7 +15,6 @@ void HAP_printf(const char *format, ...)
 	vsnprintf(buf, sizeof(buf), format, ap);
 	va_end(ap);
 	HAP_debug(buf, 0, "test.c", 1);
-	//usleep(20000);
 }
 
 int __wrap_printf(const char * format, ...)
@@ -35,8 +31,6 @@ int __wrap_printf(const char * format, ...)
 
 // Called by the SLPI LINK server to initialize and start AP
 int slpi_link_client_init(void) __attribute__ ((visibility ("default")));
-
-
 
 extern int betaflight_main(int argc, char * argv[]);
 

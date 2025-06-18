@@ -34,6 +34,11 @@
 #include "drivers/bus_i2c.h"
 #include "drivers/bus_i2c_impl.h"
 
+void i2cPinConfigure(const struct i2cConfig_s *i2cConfig)
+{
+	(void) i2cConfig;
+}
+
 uint16_t i2cGetErrorCounter(void)
 {
     return 0;
