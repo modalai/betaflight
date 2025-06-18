@@ -438,7 +438,6 @@ else
 	touch $(TARGET_HEX)
 endif
 
-
 $(TARGET_DFU): $(TARGET_HEX)
 	@echo "Creating DFU $(TARGET_DFU)" "$(STDOUT)"
 	$(V1) $(PYTHON) $(DFUSE-PACK) -i $< $@
