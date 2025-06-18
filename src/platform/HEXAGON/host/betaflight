@@ -65,7 +65,7 @@ def py_cb_func(data, len):
             except:
                 print("Socket sendall failed")
     elif data_array[0] == 0xA5:
-        # print("Got OSD data packet: " + str(len) + " bytes")
+        print("Got OSD data packet: " + str(len) + " bytes")
         binary_data = bytearray(len-1)
         for i in range(1,len):
             binary_data[i-1] = data_array[i]
