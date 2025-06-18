@@ -432,7 +432,12 @@ $(TARGET_BIN): $(TARGET_ELF)
 
 $(TARGET_HEX): $(TARGET_ELF)
 	@echo "Creating HEX $(TARGET_HEX)" "$(STDOUT)"
+ifneq ($(TARGET_MCU_FAMILY),HEXAGON)
 	$(V1) $(OBJCOPY) -O ihex --set-start 0x8000000 $< $@
+else
+	touch $(TARGET_HEX)
+endif
+
 
 $(TARGET_DFU): $(TARGET_HEX)
 	@echo "Creating DFU $(TARGET_DFU)" "$(STDOUT)"
@@ -488,8 +493,7 @@ endif
 $(TARGET_ELF): $(TARGET_OBJS) $(LD_SCRIPT) $(LD_SCRIPTS)
 	@echo "Linking $(TARGET_NAME)" "$(STDOUT)"
 ifeq ($(TARGET_MCU_FAMILY),HEXAGON)
-	hexagon-link $(LD_FLAGS) -o $(TARGET_ELF) $(TARGET_OBJS)
-	mv $(TARGET_ELF) obj/test.so
+	$(V1) hexagon-link $(LD_FLAGS) -o $(TARGET_ELF) $(TARGET_OBJS)
 else
 	$(V1) $(CROSS_CC) -o $@ $(filter-out %.ld,$^) $(LD_FLAGS)
 	$(V1) $(SIZE) $(TARGET_ELF)

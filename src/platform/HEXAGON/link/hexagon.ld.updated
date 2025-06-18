@@ -1,0 +1,108 @@
+
+
+SECTIONS {
+  /* SUBALIGN: force 4-byte alignment of input sections for pg_registry.
+     Gcc defaults to 32 bytes; padding is then inserted between object files, breaking the init structure. */
+  .pg_registry : ALIGN(32)
+  {
+    PROVIDE_HIDDEN (__pg_registry_start = . );
+    PROVIDE_HIDDEN (___pg_registry_start = . );
+    KEEP (*(.pg_registry))
+    KEEP (*(SORT(.pg_registry.*)))
+    PROVIDE_HIDDEN (__pg_registry_end = . );
+    PROVIDE_HIDDEN (___pg_registry_end = . );
+
+    PROVIDE_HIDDEN (__pg_resetdata_start = . );
+    PROVIDE_HIDDEN (___pg_resetdata_start = . );
+    KEEP (*(.pg_resetdata))
+    PROVIDE_HIDDEN (__pg_resetdata_end = . );
+    PROVIDE_HIDDEN (___pg_resetdata_end = . );
+  }
+  .text :
+  {
+    . = ALIGN(32);
+    *(.text)           /* .text sections (code) */
+    *(.text*)          /* .text* sections (code) */
+    *(.rodata)         /* .rodata sections (constants, strings, etc.) */
+    *(.rodata*)        /* .rodata* sections (constants, strings, etc.) */
+
+    KEEP (*(.init))
+    KEEP (*(.fini))
+
+    . = ALIGN(32);
+    _etext = .;        /* define a global symbols at end of code */
+  }
+  .data :
+  {
+    . = ALIGN(32);
+    _sdata = .;        /* create a global symbol at data start */
+    *(.data)           /* .data sections */
+    *(.data*)          /* .data* sections */
+
+    . = ALIGN(32);
+    _edata = .;        /* define a global symbol at data end */
+  }
+  /* Uninitialized data section */
+  . = ALIGN(32);
+  .bss :
+  {
+    /* This is used by the startup in order to initialize the .bss secion */
+    _sbss = .;         /* define a global symbol at bss start */
+    __bss_start__ = _sbss;
+    *(.bss)
+    *(SORT_BY_ALIGNMENT(.bss*))
+    *(COMMON)
+
+    . = ALIGN(32);
+    _ebss = .;         /* define a global symbol at bss end */
+    __bss_end__ = _ebss;
+  }
+  .dynsym :
+  {
+    . = ALIGN(32);
+  }
+  .dynstr :
+  {
+    . = ALIGN(32);
+  }
+  .dynamic :
+  {
+    . = ALIGN(32);
+  }
+  .ctors :
+  {
+    . = ALIGN(32);
+  }
+  .dtors :
+  {
+    . = ALIGN(32);
+  }
+  .hash :
+  {
+    . = ALIGN(32);
+  }
+  .got :
+  {
+    . = ALIGN(32);
+  }
+  .got.plt :
+  {
+    . = ALIGN(32);
+  }
+  .plt :
+  {
+    . = ALIGN(32);
+  }
+  .rela.plt :
+  {
+    . = ALIGN(32);
+  }
+  .rela.dyn :
+  {
+    . = ALIGN(32);
+  }
+}
+/* INSERT AFTER .text; */
+
+
+

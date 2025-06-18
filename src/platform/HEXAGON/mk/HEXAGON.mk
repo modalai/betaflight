@@ -6,8 +6,6 @@ HEXAGON_SDK_DIR = /opt/hexagon-sdk/4.1.0.4-lite
 INCLUDE_DIRS += $(HEXAGON_SDK_DIR)/rtos/qurt/computev66/include/qurt \
                 $(HEXAGON_SDK_DIR)/rtos/qurt/computev66/include/posix
 
-$(info In Hexagon makefile)
-
 INCLUDE_DIRS    := $(INCLUDE_DIRS) \
                    $(TARGET_PLATFORM_DIR) \
 				   $(TARGET_PLATFORM_DIR)/include
