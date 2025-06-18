@@ -152,7 +152,7 @@ ifeq ($(shell git diff --shortstat),)
 REVISION := $(shell git rev-parse --short=9 HEAD)
 endif
 
-LD_FLAGS        :=
+LD_FLAGS        ?=
 EXTRA_LD_FLAGS  :=
 
 #
@@ -176,7 +176,7 @@ else
 ifeq ($(DEBUG),INFO)
 DEBUG_FLAGS            = -ggdb2
 endif
-OPTIMISATION_BASE     := -ffast-math -fmerge-all-constants
+OPTIMISATION_BASE     ?= -flto=auto -fuse-linker-plugin -ffast-math -fmerge-all-constants
 OPTIMISE_DEFAULT      := -O2
 OPTIMISE_SPEED        := -Ofast
 OPTIMISE_SIZE         := -Os
@@ -266,8 +266,8 @@ CCACHE :=
 endif
 
 # Tool names
-CROSS_CC    := $(CCACHE) hexagon-clang
-CROSS_CXX   := $(CCACHE) hexagon-clang++
+CROSS_CC    ?= $(CCACHE) $(ARM_SDK_PREFIX)gcc
+CROSS_CXX   ?= $(CCACHE) $(ARM_SDK_PREFIX)g++
 CROSS_GDB   := $(ARM_SDK_PREFIX)gdb
 OBJCOPY     := $(ARM_SDK_PREFIX)objcopy
 OBJDUMP     := $(ARM_SDK_PREFIX)objdump
@@ -297,6 +297,10 @@ TEMPORARY_FLAGS :=
 
 EXTRA_WARNING_FLAGS := -Wold-style-definition
 
+ifeq ($(patsubst %gcc,,$(lastword $(CROSS_CC))),)
+GCC_WARNING_FLAGS := -Wunsafe-loop-optimizations
+endif
+
 CFLAGS     += $(ARCH_FLAGS) \
               $(addprefix -D,$(OPTIONS)) \
               $(addprefix -I,$(INCLUDE_DIRS)) \
@@ -304,11 +308,11 @@ CFLAGS     += $(ARCH_FLAGS) \
               $(DEBUG_FLAGS) \
               -std=gnu17 \
               -Wall -Wextra -Werror -Wdouble-promotion \
+              $(GCC_WARNING_FLAGS) \
               $(EXTRA_WARNING_FLAGS) \
               -ffunction-sections \
               -fdata-sections \
               -fno-common \
-              -fblocks \
               $(TEMPORARY_FLAGS) \
               $(DEVICE_FLAGS) \
               -D_GNU_SOURCE \
@@ -320,9 +324,6 @@ CFLAGS     += $(ARCH_FLAGS) \
               $(CONFIG_REVISION_DEFINE) \
               -pipe \
               -MMD -MP \
-              -fPIC -G0 -mv66 -fPIC -mcpu=hexagonv66 \
-              -fomit-frame-pointer -fmerge-all-constants -fno-signed-zeros -fno-trapping-math \
-              -freciprocal-math -fno-math-errno -fno-strict-aliasing -fvisibility=hidden -fno-rtti -fmath-errno \
               $(EXTRA_FLAGS)
 
 CFLAGS     := $(filter-out $(CFLAGS_DISABLED), $(CFLAGS))
@@ -335,14 +336,22 @@ ASFLAGS     = $(ARCH_FLAGS) \
               -MMD -MP
 
 ifeq ($(LD_FLAGS),)
-LD_FLAGS = -march=hexagon -mcpu=hexagonv66 -shared -call_shared -G0
-LD_FLAGS += $(TOOLS_DIR)/../target/hexagon/lib/v66/G0/pic/initS.o
-LD_FLAGS += -L$(TOOLS_DIR)/../target/hexagon/lib/v66/G0/pic
-LD_FLAGS += -Bsymbolic
-LD_FLAGS += $(TOOLS_DIR)/../target/hexagon/lib/v66/G0/pic/libgcc.a
-LD_FLAGS += --wrap=malloc --wrap=calloc --wrap=free --wrap=realloc --wrap=printf
-LD_FLAGS += --wrap=strdup --wrap=__stack_chk_fail -lc
-LD_FLAGS += -T$(LINKER_DIR)/hexagon.ld
+LD_FLAGS     = -lm \
+              -nostartfiles \
+              --specs=nano.specs \
+              -lc \
+              -lnosys \
+              $(ARCH_FLAGS) \
+              $(LTO_FLAGS) \
+              $(DEBUG_FLAGS) \
+              -static \
+              -Wl,-gc-sections,-Map,$(TARGET_MAP) \
+              -Wl,-L$(LINKER_DIR) \
+              -Wl,--cref \
+              -Wl,--no-wchar-size-warning \
+              -Wl,--print-memory-usage \
+              -T$(LD_SCRIPT) \
+               $(EXTRA_LD_FLAGS)
 endif
 
 ###############################################################################
@@ -478,8 +487,13 @@ endif
 
 $(TARGET_ELF): $(TARGET_OBJS) $(LD_SCRIPT) $(LD_SCRIPTS)
 	@echo "Linking $(TARGET_NAME)" "$(STDOUT)"
+ifeq ($(TARGET_MCU_FAMILY),HEXAGON)
 	hexagon-link $(LD_FLAGS) -o $(TARGET_ELF) $(TARGET_OBJS)
 	mv $(TARGET_ELF) obj/test.so
+else
+	$(V1) $(CROSS_CC) -o $@ $(filter-out %.ld,$^) $(LD_FLAGS)
+	$(V1) $(SIZE) $(TARGET_ELF)
+endif
 
 $(TARGET_UF2): $(TARGET_ELF)
 	@echo "Creating UF2 $(TARGET_UF2)" "$(STDOUT)"
