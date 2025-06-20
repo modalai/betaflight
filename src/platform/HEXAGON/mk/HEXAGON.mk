@@ -14,12 +14,12 @@ MCU_FLASH_SIZE	:= 8192
 
 MCU_COMMON_SRC = \
              HEXAGON/bus_i2c_hexagon.c \
-             HEXAGON/bus_i2c_hexagon_init.c \
              HEXAGON/audio_hexagon.c \
              HEXAGON/bus_spi_hexagon.c \
              HEXAGON/serial_uart_hexagon.c \
              HEXAGON/motor_hexagon.c \
              drivers/bus_spi_config.c \
+             HEXAGON/src/barometer_icp10100.c \
              HEXAGON/unresolved.c \
              HEXAGON/exti.c \
              HEXAGON/target/HEXAGONV66/hexagon_main.c

@@ -106,7 +106,8 @@ extern size_t strnlen(const char s[], size_t maxlen);
 #define USE_MAG
 #define USE_VIRTUAL_MAG
 
-#undef USE_BARO
+#define USE_BARO
+#define USE_BARO_ICP10100
 
 #define USE_GPS
 #define USE_GPS_UBLOX
@@ -183,6 +184,13 @@ extern size_t strnlen(const char s[], size_t maxlen);
 #define PLATFORM_NO_LIBC 0
 
 #define USE_I2C
+#define USE_I2C_DEVICE_1
+#define USE_I2C_DEVICE_2
+#define USE_I2C_DEVICE_3
+
+#define BARO_I2C_INSTANCE I2CDEV_3
+#define DEFAULT_BARO_DEVICE BARO_ICP10100
+
 #define USE_SPI
 #define USE_SPI_DEVICE_1
 
