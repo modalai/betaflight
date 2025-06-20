@@ -56,6 +56,11 @@ bool i2cBusReadRegisterBuffer(const extDevice_t *dev, uint8_t reg, uint8_t *data
     return i2cRead(dev->bus->busType_u.i2c.device, dev->busType_u.i2c.address, reg, length, data);
 }
 
+bool i2cBusReadRegisterBuffer16(const extDevice_t *dev, uint16_t reg, uint16_t *data, uint8_t length)
+{
+    return i2cRead16(dev->bus->busType_u.i2c.device, dev->busType_u.i2c.address, reg, length, data);
+}
+
 uint8_t i2cBusReadRegister(const extDevice_t *dev, uint8_t reg)
 {
     uint8_t data;

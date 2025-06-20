@@ -16,3 +16,8 @@ extern int sl_client_config_spi_bus(void);
 extern int sl_client_spi_transfer(int fd, const uint8_t *send, uint8_t *recv, const unsigned len);
 
 extern int sl_client_register_interrupt_callback(int (*func)(int, void*, void*), void* arg);
+
+// I2C interface API
+extern int sl_client_config_i2c_bus(uint8_t bus_number, uint8_t address, uint32_t frequency);
+extern void sl_client_set_address_i2c_bus(int fd, uint8_t address);
+extern int sl_client_i2c_transfer(int fd, const uint8_t *send, const unsigned send_len, uint8_t *recv, const unsigned recv_len);

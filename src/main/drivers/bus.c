@@ -139,6 +139,23 @@ bool busReadRegisterBuffer(const extDevice_t *dev, uint8_t reg, uint8_t *data, u
     }
 }
 
+bool busReadRegisterBuffer16(const extDevice_t *dev, uint16_t reg, uint16_t *data, uint8_t length)
+{
+#if !defined(USE_I2C)
+    UNUSED(reg);
+    UNUSED(data);
+    UNUSED(length);
+#endif
+    switch (dev->bus->busType) {
+#ifdef USE_I2C
+    case BUS_TYPE_I2C:
+        return i2cBusReadRegisterBuffer16(dev, reg, data, length);
+#endif
+    default:
+        return false;
+    }
+}
+
 // Start the I2C read, but do not wait for completion
 bool busReadRegisterBufferStart(const extDevice_t *dev, uint8_t reg, uint8_t *data, uint8_t length)
 {

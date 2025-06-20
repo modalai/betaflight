@@ -20,21 +20,4 @@
 
 #pragma once
 
-#define IOCFG_OUT_PP        0
-#define IOCFG_OUT_OD        0
-#define IOCFG_AF_PP         0
-#define IOCFG_AF_OD         0
-#define IOCFG_IPD           0
-#define IOCFG_IPU           0
-#define IOCFG_IN_FLOATING   0
-
-#define I2CDEV_COUNT        3  // 4 for VOXL 2 and 3 for VOXL 2 mini
-#define SPIDEV_COUNT        1
-
-#define SERIAL_TRAIT_PIN_CONFIG 0
-
-#define NVIC_PriorityGroup_2 0x500
-
-#define SPI_IO_CS_CFG 5
-
-#define MAX_SPI_PIN_SEL 2
+bool icp10100Detect(baroDev_t *baro);

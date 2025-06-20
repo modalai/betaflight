@@ -1,0 +1,9 @@
+
+Barometer driver with 16 bit values
+
+barometer_icp10100.c: busReadRegisterBuffer16
+bus.c: busReadRegisterBuffer16 -> i2cBusReadRegisterBuffer16
+bus_i2c_busdev.c: i2cBusReadRegisterBuffer16 -> i2cRead16
+buf_i2c_hexagon.c: i2cRead16
+bus_i2c.h has prototype for i2cRead16
+

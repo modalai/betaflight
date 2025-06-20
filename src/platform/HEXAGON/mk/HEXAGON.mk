@@ -14,7 +14,6 @@ MCU_FLASH_SIZE	:= 8192
 
 MCU_COMMON_SRC = \
              HEXAGON/bus_i2c_hexagon.c \
-             HEXAGON/bus_i2c_hexagon_init.c \
              HEXAGON/audio_hexagon.c \
              HEXAGON/bus_spi_hexagon.c \
              HEXAGON/serial_uart_hexagon.c \
