@@ -97,6 +97,38 @@ bool busWriteRegister(const extDevice_t *dev, uint8_t reg, uint8_t data)
     }
 }
 
+bool busWriteCommand16(const extDevice_t *dev, uint16_t cmd)
+{
+#if !defined(USE_I2C)
+    UNUSED(cmd);
+    UNUSED(data);
+#endif
+    switch (dev->bus->busType) {
+#ifdef USE_I2C
+    case BUS_TYPE_I2C:
+        return i2cBusWriteCommand16(dev, cmd);
+#endif
+    default:
+        return false;
+    }
+}
+
+bool busWriteRegisterBuffer16(const extDevice_t *dev, uint16_t reg, uint8_t *data, uint8_t length)
+{
+#if !defined(USE_I2C)
+    UNUSED(reg);
+    UNUSED(data);
+#endif
+    switch (dev->bus->busType) {
+#ifdef USE_I2C
+    case BUS_TYPE_I2C:
+        return i2cBusWriteRegisterBuffer16(dev, reg, data, length);
+#endif
+    default:
+        return false;
+    }
+}
+
 bool busWriteRegisterStart(const extDevice_t *dev, uint8_t reg, uint8_t data)
 {
 #if !defined(USE_SPI) && !defined(USE_I2C)
@@ -139,7 +171,7 @@ bool busReadRegisterBuffer(const extDevice_t *dev, uint8_t reg, uint8_t *data, u
     }
 }
 
-bool busReadRegisterBuffer16(const extDevice_t *dev, uint16_t reg, uint16_t *data, uint8_t length)
+bool busReadRegisterBuffer16(const extDevice_t *dev, uint16_t reg, uint8_t *data, uint8_t length)
 {
 #if !defined(USE_I2C)
     UNUSED(reg);

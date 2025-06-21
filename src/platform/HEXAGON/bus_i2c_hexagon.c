@@ -79,6 +79,19 @@ bool i2cWrite(I2CDevice device, uint8_t addr_, uint8_t reg_, uint8_t data)
     return true;
 }
 
+bool i2cWriteCommand16(I2CDevice device, uint8_t addr_, uint16_t cmd_)
+{
+	if (i2cBusAddr[device] != addr_) {
+        sl_client_set_address_i2c_bus(device, addr_);
+        i2cBusAddr[device] = addr_;
+	}
+
+	uint8_t buff[2];
+	buff[0] = (cmd_ >> 8) & 0xff;
+	buff[1] = cmd_ & 0xff;
+    return (sl_client_i2c_transfer(device, buff, 2, NULL, 0) == 0);
+}
+
 // Non-blocking write
 bool i2cWriteBuffer(I2CDevice device, uint8_t addr_, uint8_t reg_, uint8_t len_, uint8_t *data)
 {
@@ -89,6 +102,26 @@ bool i2cWriteBuffer(I2CDevice device, uint8_t addr_, uint8_t reg_, uint8_t len_,
     (void) data;
     return true;
 }
+
+bool i2cWriteBuffer16(I2CDevice device, uint8_t addr_, uint16_t reg_, uint8_t len_, uint8_t *data)
+{
+	if (len_ > 3) {
+		printf("ERROR: Cannot write %d bytes", len_);
+		return false;
+	}
+
+	if (i2cBusAddr[device] != addr_) {
+        sl_client_set_address_i2c_bus(device, addr_);
+        i2cBusAddr[device] = addr_;
+	}
+
+	uint8_t buf[5];
+	buf[0] = (reg_ >> 8) & 0xff;
+	buf[1] = reg_ & 0xff;
+	memcpy(&buf[2], data, len_);
+    return (sl_client_i2c_transfer(device, buf, len_ + 2, NULL, 0) == 0);
+}
+
 
 // Blocking read
 bool i2cRead(I2CDevice device, uint8_t addr_, uint8_t reg_, uint8_t len, uint8_t* buf)
@@ -101,7 +134,7 @@ bool i2cRead(I2CDevice device, uint8_t addr_, uint8_t reg_, uint8_t len, uint8_t
     return true;
 }
 
-bool i2cRead16(I2CDevice device, uint8_t addr_, uint16_t reg_, uint8_t len, uint16_t* buf)
+bool i2cRead16(I2CDevice device, uint8_t addr_, uint16_t reg_, uint8_t len, uint8_t* buf)
 {
 	if (i2cBusAddr[device] != addr_) {
         sl_client_set_address_i2c_bus(device, addr_);
@@ -111,7 +144,7 @@ bool i2cRead16(I2CDevice device, uint8_t addr_, uint16_t reg_, uint8_t len, uint
 	uint8_t buff[2];
 	buff[0] = (reg_ >> 8) & 0xff;
 	buff[1] = reg_ & 0xff;
-    return (sl_client_i2c_transfer(device, buff, 2, (uint8_t*) buf, len * 2) == 0);
+    return (sl_client_i2c_transfer(device, buff, 2, (uint8_t*) buf, len) == 0);
 }
 
 // Non-blocking read

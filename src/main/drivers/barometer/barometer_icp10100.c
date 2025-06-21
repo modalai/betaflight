@@ -39,48 +39,52 @@
 
 #if defined(USE_BARO) && defined(USE_BARO_ICP10100)
 
+#define ICP10100_OTP_ADDR_LEN 3
+#define ICP10100_OTP_SCAL_LEN 3
+#define ICP10100_NUM_OTP_SCAL 4
+
 #define ICP10100_I2C_ADDR                      (0x63)
 #define ICP10100_DEFAULT_CHIP_ID               (0x08)
 
 #define ICP10100_CHIP_ID_REG                   (0xefc8)  /* Chip ID Register */
+#define ICP10100_SOFT_RESET_CMD                (0x805d)  /* Soft reset command */
+#define ICP10100_SET_ADDR_CMD                  (0xc595)  /* Set address command */
+#define ICP10100_READ_OTP_REG                  (0xc7f7)
 
 
-
-
-#define ICP10100_RST_REG                       (0xE0)  /* Softreset Register */
-#define ICP10100_STAT_REG                      (0xF3)  /* Status Register */
-#define ICP10100_CTRL_MEAS_REG                 (0xF4)  /* Ctrl Measure Register */
-#define ICP10100_CONFIG_REG                    (0xF5)  /* Configuration Register */
-#define ICP10100_PRESSURE_MSB_REG              (0xF7)  /* Pressure MSB Register */
-#define ICP10100_PRESSURE_LSB_REG              (0xF8)  /* Pressure LSB Register */
-#define ICP10100_PRESSURE_XLSB_REG             (0xF9)  /* Pressure XLSB Register */
-#define ICP10100_TEMPERATURE_MSB_REG           (0xFA)  /* Temperature MSB Reg */
-#define ICP10100_TEMPERATURE_LSB_REG           (0xFB)  /* Temperature LSB Reg */
-#define ICP10100_TEMPERATURE_XLSB_REG          (0xFC)  /* Temperature XLSB Reg */
-#define ICP10100_FORCED_MODE                   (0x01)
-
-#define ICP10100_TEMPERATURE_CALIB_DIG_T1_LSB_REG             (0x88)
-#define ICP10100_PRESSURE_TEMPERATURE_CALIB_DATA_LENGTH       (24)
-#define ICP10100_DATA_FRAME_SIZE               (6)
-
-#define ICP10100_OVERSAMP_SKIPPED          (0x00)
-#define ICP10100_OVERSAMP_1X               (0x01)
-#define ICP10100_OVERSAMP_2X               (0x02)
-#define ICP10100_OVERSAMP_4X               (0x03)
-#define ICP10100_OVERSAMP_8X               (0x04)
-#define ICP10100_OVERSAMP_16X              (0x05)
-
-// configure pressure and temperature oversampling, forced sampling mode
-#define ICP10100_PRESSURE_OSR              (ICP10100_OVERSAMP_8X)
-#define ICP10100_TEMPERATURE_OSR           (ICP10100_OVERSAMP_1X)
-#define ICP10100_MODE                      (ICP10100_PRESSURE_OSR << 2 | ICP10100_TEMPERATURE_OSR << 5 | ICP10100_FORCED_MODE)
-
-#define T_INIT_MAX                       (20)
-// 20/16 = 1.25 ms
-#define T_MEASURE_PER_OSRS_MAX           (37)
-// 37/16 = 2.3125 ms
-#define T_SETUP_PRESSURE_MAX             (10)
-// 10/16 = 0.625 ms
+// #define ICP10100_STAT_REG                      (0xF3)  /* Status Register */
+// #define ICP10100_CTRL_MEAS_REG                 (0xF4)  /* Ctrl Measure Register */
+// #define ICP10100_CONFIG_REG                    (0xF5)  /* Configuration Register */
+// #define ICP10100_PRESSURE_MSB_REG              (0xF7)  /* Pressure MSB Register */
+// #define ICP10100_PRESSURE_LSB_REG              (0xF8)  /* Pressure LSB Register */
+// #define ICP10100_PRESSURE_XLSB_REG             (0xF9)  /* Pressure XLSB Register */
+// #define ICP10100_TEMPERATURE_MSB_REG           (0xFA)  /* Temperature MSB Reg */
+// #define ICP10100_TEMPERATURE_LSB_REG           (0xFB)  /* Temperature LSB Reg */
+// #define ICP10100_TEMPERATURE_XLSB_REG          (0xFC)  /* Temperature XLSB Reg */
+// #define ICP10100_FORCED_MODE                   (0x01)
+// 
+// #define ICP10100_TEMPERATURE_CALIB_DIG_T1_LSB_REG             (0x88)
+// #define ICP10100_PRESSURE_TEMPERATURE_CALIB_DATA_LENGTH       (24)
+// #define ICP10100_DATA_FRAME_SIZE               (6)
+// 
+// #define ICP10100_OVERSAMP_SKIPPED          (0x00)
+// #define ICP10100_OVERSAMP_1X               (0x01)
+// #define ICP10100_OVERSAMP_2X               (0x02)
+// #define ICP10100_OVERSAMP_4X               (0x03)
+// #define ICP10100_OVERSAMP_8X               (0x04)
+// #define ICP10100_OVERSAMP_16X              (0x05)
+// 
+// // configure pressure and temperature oversampling, forced sampling mode
+// #define ICP10100_PRESSURE_OSR              (ICP10100_OVERSAMP_8X)
+// #define ICP10100_TEMPERATURE_OSR           (ICP10100_OVERSAMP_1X)
+// #define ICP10100_MODE                      (ICP10100_PRESSURE_OSR << 2 | ICP10100_TEMPERATURE_OSR << 5 | ICP10100_FORCED_MODE)
+// 
+// #define T_INIT_MAX                       (20)
+// // 20/16 = 1.25 ms
+// #define T_MEASURE_PER_OSRS_MAX           (37)
+// // 37/16 = 2.3125 ms
+// #define T_SETUP_PRESSURE_MAX             (10)
+// // 10/16 = 0.625 ms
 
 // typedef struct icp10100_calib_param_s {
 //     uint16_t dig_T1; /* calibration T1 data */
@@ -101,7 +105,10 @@
 
 // STATIC_UNIT_TESTED int32_t t_fine; /* calibration t_fine data */
 
+static int16_t _scal[ICP10100_NUM_OTP_SCAL];
+
 static uint16_t icp10100_chip_id = 0;
+
 // STATIC_UNIT_TESTED icp10100_calib_param_t icp10100_cal;
 // uncompensated pressure and temperature
 // int32_t icp10100_up = 0;
@@ -117,44 +124,32 @@ static uint16_t icp10100_chip_id = 0;
 
 // STATIC_UNIT_TESTED void icp10100Calculate(int32_t *pressure, int32_t *temperature);
 
-static void icp10100BusInit(const extDevice_t *dev)
+static int8_t cal_crc(uint8_t seed, uint8_t data)
 {
-    UNUSED(dev);
-}
+	int8_t poly = 0x31;
+	int8_t var2;
+	uint8_t i;
 
-static void icp10100BusDeinit(const extDevice_t *dev)
-{
-    UNUSED(dev);
-}
+	for (i = 0; i < 8; i++) {
+		if ((seed & 0x80) ^ (data & 0x80)) {
+			var2 = 1;
 
-#include "drivers/time.h"
+		} else {
+			var2 = 0;
+		}
+
+		seed = (seed & 0x7F) << 1;
+		data = (data & 0x7F) << 1;
+		seed = seed ^ (uint8_t)(poly * var2);
+	}
+
+	return (int8_t)seed;
+}
 
 bool icp10100Detect(baroDev_t *baro)
 {
-    delay(20);
-
-	printf("In icp10100Detect");
-
-	if (baro == NULL) {
-		printf("baro is NULL");
-		return false;
-	}
-
     extDevice_t *dev = &baro->dev;
-
-	if (dev == NULL) {
-		printf("dev is NULL");
-		return false;
-	}
-
     bool defaultAddressApplied = false;
-
-    icp10100BusInit(dev);
-
-	if (dev->bus == NULL) {
-		printf("dev->bus is NULL");
-		return false;
-	}
 
     if ((dev->bus->busType == BUS_TYPE_I2C) && (dev->busType_u.i2c.address == 0)) {
         // Default address for ICP10100
@@ -162,16 +157,11 @@ bool icp10100Detect(baroDev_t *baro)
         defaultAddressApplied = true;
     }
 
-	printf("Reading chip id in icp10100Detect");
-
-    busReadRegisterBuffer16(dev, ICP10100_CHIP_ID_REG, &icp10100_chip_id, 1);  /* read Chip Id */
-
-	printf("Read 0x%0.4x chip id in icp10100Detect", icp10100_chip_id);
+    busReadRegisterBuffer16(dev, ICP10100_CHIP_ID_REG, (uint8_t*) &icp10100_chip_id, 2);  /* read Chip Id */
 
 	uint8_t chipId = (icp10100_chip_id >> 8) & 0x3f;
 
 	if (chipId != ICP10100_DEFAULT_CHIP_ID) {
-        icp10100BusDeinit(dev);
         if (defaultAddressApplied) {
             dev->busType_u.i2c.address = 0;
         }
@@ -181,11 +171,53 @@ bool icp10100Detect(baroDev_t *baro)
 		printf("Detected icp10100!!!");
 	}
 
-    // busDeviceRegister(dev);
-	// 
-    // // read calibration
-    // busReadRegisterBuffer(dev, ICP10100_TEMPERATURE_CALIB_DIG_T1_LSB_REG, (uint8_t *)&icp10100_cal, sizeof(icp10100_calib_param_t));
-	// 
+    busDeviceRegister(dev);
+
+	busWriteCommand16(dev, ICP10100_SOFT_RESET_CMD);
+
+	delay(100);
+
+    busReadRegisterBuffer16(dev, ICP10100_CHIP_ID_REG, (uint8_t*) &icp10100_chip_id, 2);  /* read Chip Id */
+
+	chipId = (icp10100_chip_id >> 8) & 0x3f;
+
+	if (chipId != ICP10100_DEFAULT_CHIP_ID) {
+        if (defaultAddressApplied) {
+            dev->busType_u.i2c.address = 0;
+        }
+		printf("Didn't detect icp10100 after reset");
+        return false;
+    } else {
+		printf("Detected icp10100 after reset!!!");
+	}
+	
+    // read OTP
+	uint8_t addrOTPCmd[ICP10100_OTP_ADDR_LEN] = {0x00, 0x66, 0x9c};
+	uint8_t otpBuf[ICP10100_OTP_SCAL_LEN];
+	uint8_t crc;
+	// bool success = true;
+
+    busWriteRegisterBuffer16(dev, ICP10100_SET_ADDR_CMD, addrOTPCmd, ICP10100_OTP_ADDR_LEN);
+	
+	for (uint8_t i = 0; i < ICP10100_NUM_OTP_SCAL; i++) {
+    	busReadRegisterBuffer16(dev, ICP10100_READ_OTP_REG, otpBuf, ICP10100_OTP_SCAL_LEN);
+
+		crc = 0xFF;
+
+		for (int j = 0; j < ICP10100_OTP_SCAL_LEN - 1; j++) {
+			crc = (uint8_t) cal_crc(crc, otpBuf[j]);
+		}
+
+		if (crc != otpBuf[2]) {
+			printf("ERROR, CRC failed on OTP scale factor");
+			// TODO
+		} else {
+			printf("CRC passed on OTP scale factor %d", i);
+		}
+
+		_scal[i] = (otpBuf[0] << 8) | otpBuf[1];
+	}
+
     // // set oversampling + power mode (forced), and start sampling
     // busWriteRegister(dev, ICP10100_CTRL_MEAS_REG, ICP10100_MODE);
 	// 
