@@ -162,6 +162,6 @@ bool i2cBusy(I2CDevice device, bool *error)
 {
     (void) device;
     (void) error;
-    return true;
+    return false;
 }
 

@@ -50,6 +50,8 @@
 #define ICP10100_SOFT_RESET_CMD                (0x805d)  /* Soft reset command */
 #define ICP10100_SET_ADDR_CMD                  (0xc595)  /* Set address command */
 #define ICP10100_READ_OTP_REG                  (0xc7f7)
+#define ICP10100_LN_MEASURE_CMD                (0x70df)
+#define ICP10100_ULN_MEASURE_CMD               (0x7866)
 
 
 // #define ICP10100_STAT_REG                      (0xF3)  /* Status Register */
@@ -104,6 +106,14 @@
 // STATIC_ASSERT(sizeof(icp10100_calib_param_t) == ICP10100_PRESSURE_TEMPERATURE_CALIB_DATA_LENGTH, icp10100_calibration_structure_incorrectly_packed);
 
 // STATIC_UNIT_TESTED int32_t t_fine; /* calibration t_fine data */
+
+static bool icp10100StartUT(baroDev_t *baro);
+static bool icp10100ReadUT(baroDev_t *baro);
+static bool icp10100GetUT(baroDev_t *baro);
+static bool icp10100StartUP(baroDev_t *baro);
+static bool icp10100ReadUP(baroDev_t *baro);
+static bool icp10100GetUP(baroDev_t *baro);
+static void icp10100Calculate(int32_t *pressure, int32_t *temperature);
 
 static int16_t _scal[ICP10100_NUM_OTP_SCAL];
 
@@ -218,113 +228,122 @@ bool icp10100Detect(baroDev_t *baro)
 		_scal[i] = (otpBuf[0] << 8) | otpBuf[1];
 	}
 
-    // // set oversampling + power mode (forced), and start sampling
-    // busWriteRegister(dev, ICP10100_CTRL_MEAS_REG, ICP10100_MODE);
-	// 
-    // // these are dummy as temperature is measured as part of pressure
-    // baro->combined_read = true;
-    // baro->ut_delay = 0;
-    // baro->start_ut = icp10100StartUT;
-    // baro->get_ut = icp10100GetUT;
-    // baro->read_ut = icp10100ReadUT;
-    // // only _up part is executed, and gets both temperature and pressure
-    // baro->start_up = icp10100StartUP;
-    // baro->get_up = icp10100GetUP;
-    // baro->read_up = icp10100ReadUP;
-    // baro->up_delay = ((T_INIT_MAX + T_MEASURE_PER_OSRS_MAX * (((1 << ICP10100_TEMPERATURE_OSR) >> 1) + ((1 << ICP10100_PRESSURE_OSR) >> 1)) + (ICP10100_PRESSURE_OSR ? T_SETUP_PRESSURE_MAX : 0) + 15) / 16) * 1000;
-    // baro->calculate = icp10100Calculate;
+    // Start sampling in ultra-low noise (ULN) mode
+    // busWriteCommand16(dev, ICP10100_ULN_MEASURE_CMD);
+    busWriteCommand16(dev, ICP10100_LN_MEASURE_CMD);
+	
+    // these are dummy as temperature is measured as part of pressure
+    baro->combined_read = true;
+    baro->ut_delay = 0;
+    baro->start_ut = icp10100StartUT;
+    baro->get_ut = icp10100GetUT;
+    baro->read_ut = icp10100ReadUT;
+    // only _up part is executed, and gets both temperature and pressure
+    baro->start_up = icp10100StartUP;
+    baro->get_up = icp10100GetUP;
+    baro->read_up = icp10100ReadUP;
+    // baro->up_delay = 95 * 1000;  // 95ms ultra low noise (but 65ms is max)
+    baro->up_delay = 24 * 1000;  // 24ms low noise
+    baro->calculate = icp10100Calculate;
 
     return true;
 }
 
-// static bool icp10100StartUT(baroDev_t *baro)
-// {
-//     UNUSED(baro);
-//     // dummy
-// 
-//     return true;
-// }
-// 
-// static bool icp10100ReadUT(baroDev_t *baro)
-// {
-//     UNUSED(baro);
-//     // dummy
-//     return true;
-// }
-// 
-// static bool icp10100GetUT(baroDev_t *baro)
-// {
-//     UNUSED(baro);
-//     // dummy
-//     return true;
-// }
-// 
-// static bool icp10100StartUP(baroDev_t *baro)
-// {
-//     // start measurement
-//     // set oversampling + power mode (forced), and start sampling
-//     return busWriteRegisterStart(&baro->dev, ICP10100_CTRL_MEAS_REG, ICP10100_MODE);
-// }
-// 
-// static bool icp10100ReadUP(baroDev_t *baro)
-// {
-//     if (busBusy(&baro->dev, NULL)) {
-//         return false;
-//     }
-// 
-//     // read data from sensor
-//     return busReadRegisterBufferStart(&baro->dev, ICP10100_PRESSURE_MSB_REG, sensor_data, ICP10100_DATA_FRAME_SIZE);
-// }
-// 
-// static bool icp10100GetUP(baroDev_t *baro)
-// {
-//     if (busBusy(&baro->dev, NULL)) {
-//         return false;
-//     }
-// 
-//     icp10100_up = (int32_t)(sensor_data[0] << 12 | sensor_data[1] << 4 | sensor_data[2] >> 4);
-//     icp10100_ut = (int32_t)(sensor_data[3] << 12 | sensor_data[4] << 4 | sensor_data[5] >> 4);
-// 
-//     return true;
-// }
-// 
+static bool icp10100StartUT(baroDev_t *baro)
+{
+    UNUSED(baro);
+    // dummy
+
+    return true;
+}
+
+static bool icp10100ReadUT(baroDev_t *baro)
+{
+    UNUSED(baro);
+    // dummy
+    return true;
+}
+
+static bool icp10100GetUT(baroDev_t *baro)
+{
+    UNUSED(baro);
+    // dummy
+    return true;
+}
+
+static bool icp10100StartUP(baroDev_t *baro)
+{
+    // start measurement
+    // Start sampling in ultra-low noise (ULN) mode
+    // busWriteCommand16(&baro->dev, ICP10100_ULN_MEASURE_CMD);
+    busWriteCommand16(&baro->dev, ICP10100_LN_MEASURE_CMD);
+
+	return true;
+}
+
+static bool icp10100ReadUP(baroDev_t *baro)
+{
+    if (busBusy(&baro->dev, NULL)) {
+        return false;
+    }
+
+    // read data from sensor
+    // return busReadRegisterBufferStart(&baro->dev, ICP10100_PRESSURE_MSB_REG, sensor_data, ICP10100_DATA_FRAME_SIZE);
+    return false;
+}
+
+static bool icp10100GetUP(baroDev_t *baro)
+{
+    if (busBusy(&baro->dev, NULL)) {
+        return false;
+    }
+
+    // icp10100_up = (int32_t)(sensor_data[0] << 12 | sensor_data[1] << 4 | sensor_data[2] >> 4);
+    // icp10100_ut = (int32_t)(sensor_data[3] << 12 | sensor_data[4] << 4 | sensor_data[5] >> 4);
+	// 
+    // return true;
+    return false;
+}
+
 // // Returns temperature in DegC, resolution is 0.01 DegC. Output value of "5123" equals 51.23 DegC
 // // t_fine carries fine temperature as global value
 // static int32_t icp10100CompensateTemperature(int32_t adc_T)
 // {
-//     int32_t var1, var2, T;
-// 
-//     var1 = ((((adc_T >> 3) - ((int32_t)icp10100_cal.dig_T1 << 1))) * ((int32_t)icp10100_cal.dig_T2)) >> 11;
-//     var2  = (((((adc_T >> 4) - ((int32_t)icp10100_cal.dig_T1)) * ((adc_T >> 4) - ((int32_t)icp10100_cal.dig_T1))) >> 12) * ((int32_t)icp10100_cal.dig_T3)) >> 14;
-//     t_fine = var1 + var2;
-//     T = (t_fine * 5 + 128) >> 8;
-// 
-//     return T;
+// //     int32_t var1, var2, T;
+// // 
+// //     var1 = ((((adc_T >> 3) - ((int32_t)icp10100_cal.dig_T1 << 1))) * ((int32_t)icp10100_cal.dig_T2)) >> 11;
+// //     var2  = (((((adc_T >> 4) - ((int32_t)icp10100_cal.dig_T1)) * ((adc_T >> 4) - ((int32_t)icp10100_cal.dig_T1))) >> 12) * ((int32_t)icp10100_cal.dig_T3)) >> 14;
+// //     t_fine = var1 + var2;
+// //     T = (t_fine * 5 + 128) >> 8;
+// // 
+// //     return T;
 // }
-// 
+
 // // Returns pressure in Pa as unsigned 32 bit integer in Q24.8 format (24 integer bits and 8 fractional bits).
 // // Output value of "24674867" represents 24674867/256 = 96386.2 Pa = 963.862 hPa
 // static uint32_t icp10100CompensatePressure(int32_t adc_P)
 // {
-//     int64_t var1, var2, p;
-//     var1 = ((int64_t)t_fine) - 128000;
-//     var2 = var1 * var1 * (int64_t)icp10100_cal.dig_P6;
-//     var2 = var2 + ((var1*(int64_t)icp10100_cal.dig_P5) << 17);
-//     var2 = var2 + (((int64_t)icp10100_cal.dig_P4) << 35);
-//     var1 = ((var1 * var1 * (int64_t)icp10100_cal.dig_P3) >> 8) + ((var1 * (int64_t)icp10100_cal.dig_P2) << 12);
-//     var1 = (((((int64_t)1) << 47) + var1)) * ((int64_t)icp10100_cal.dig_P1) >> 33;
-//     if (var1 == 0)
-//         return 0;
-//     p = 1048576 - adc_P;
-//     p = (((p << 31) - var2) * 3125) / var1;
-//     var1 = (((int64_t)icp10100_cal.dig_P9) * (p >> 13) * (p >> 13)) >> 25;
-//     var2 = (((int64_t)icp10100_cal.dig_P8) * p) >> 19;
-//     p = ((p + var1 + var2) >> 8) + (((int64_t)icp10100_cal.dig_P7) << 4);
-//     return (uint32_t)p;
+// //     int64_t var1, var2, p;
+// //     var1 = ((int64_t)t_fine) - 128000;
+// //     var2 = var1 * var1 * (int64_t)icp10100_cal.dig_P6;
+// //     var2 = var2 + ((var1*(int64_t)icp10100_cal.dig_P5) << 17);
+// //     var2 = var2 + (((int64_t)icp10100_cal.dig_P4) << 35);
+// //     var1 = ((var1 * var1 * (int64_t)icp10100_cal.dig_P3) >> 8) + ((var1 * (int64_t)icp10100_cal.dig_P2) << 12);
+// //     var1 = (((((int64_t)1) << 47) + var1)) * ((int64_t)icp10100_cal.dig_P1) >> 33;
+// //     if (var1 == 0)
+// //         return 0;
+// //     p = 1048576 - adc_P;
+// //     p = (((p << 31) - var2) * 3125) / var1;
+// //     var1 = (((int64_t)icp10100_cal.dig_P9) * (p >> 13) * (p >> 13)) >> 25;
+// //     var2 = (((int64_t)icp10100_cal.dig_P8) * p) >> 19;
+// //     p = ((p + var1 + var2) >> 8) + (((int64_t)icp10100_cal.dig_P7) << 4);
+// //     return (uint32_t)p;
 // }
-// 
-// STATIC_UNIT_TESTED void icp10100Calculate(int32_t *pressure, int32_t *temperature)
-// {
+
+static void icp10100Calculate(int32_t *pressure, int32_t *temperature)
+{
+	*pressure = 0;
+	*temperature = 0;
 //     // calculate
 //     int32_t t;
 //     uint32_t p;
@@ -335,6 +354,6 @@ bool icp10100Detect(baroDev_t *baro)
 //         *pressure = (int32_t)(p / 256);
 //     if (temperature)
 //         *temperature = t;
-// }
+}
 
 #endif
