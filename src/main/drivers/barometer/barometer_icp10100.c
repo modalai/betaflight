@@ -243,7 +243,7 @@ bool icp10100Detect(baroDev_t *baro)
     baro->get_up = icp10100GetUP;
     baro->read_up = icp10100ReadUP;
     // baro->up_delay = 95 * 1000;  // 95ms ultra low noise (but 65ms is max)
-    baro->up_delay = 24 * 1000;  // 24ms low noise
+    baro->up_delay = 26 * 1000;  // 26ms low noise
     baro->calculate = icp10100Calculate;
 
     return true;
@@ -254,6 +254,8 @@ static bool icp10100StartUT(baroDev_t *baro)
     UNUSED(baro);
     // dummy
 
+	printf("In icp10100StartUT");
+
     return true;
 }
 
@@ -261,6 +263,8 @@ static bool icp10100ReadUT(baroDev_t *baro)
 {
     UNUSED(baro);
     // dummy
+	printf("In icp10100ReadUT");
+
     return true;
 }
 
@@ -268,6 +272,8 @@ static bool icp10100GetUT(baroDev_t *baro)
 {
     UNUSED(baro);
     // dummy
+	printf("In icp10100GetUT");
+
     return true;
 }
 
@@ -278,31 +284,37 @@ static bool icp10100StartUP(baroDev_t *baro)
     // busWriteCommand16(&baro->dev, ICP10100_ULN_MEASURE_CMD);
     busWriteCommand16(&baro->dev, ICP10100_LN_MEASURE_CMD);
 
+	// printf("In icp10100StartUP");
+
 	return true;
 }
 
 static bool icp10100ReadUP(baroDev_t *baro)
 {
+	// printf("In icp10100ReadUP");
+
     if (busBusy(&baro->dev, NULL)) {
         return false;
     }
 
     // read data from sensor
-    // return busReadRegisterBufferStart(&baro->dev, ICP10100_PRESSURE_MSB_REG, sensor_data, ICP10100_DATA_FRAME_SIZE);
-    return false;
+	// uint8_t comp_data[9] = {};
+    // return busRawReadBuffer(&baro->dev, comp_data, 9);
+    return true;
 }
 
 static bool icp10100GetUP(baroDev_t *baro)
 {
+	// printf("In icp10100GetUP");
+
     if (busBusy(&baro->dev, NULL)) {
         return false;
     }
 
     // icp10100_up = (int32_t)(sensor_data[0] << 12 | sensor_data[1] << 4 | sensor_data[2] >> 4);
     // icp10100_ut = (int32_t)(sensor_data[3] << 12 | sensor_data[4] << 4 | sensor_data[5] >> 4);
-	// 
-    // return true;
-    return false;
+	
+    return true;
 }
 
 // // Returns temperature in DegC, resolution is 0.01 DegC. Output value of "5123" equals 51.23 DegC
@@ -342,6 +354,8 @@ static bool icp10100GetUP(baroDev_t *baro)
 
 static void icp10100Calculate(int32_t *pressure, int32_t *temperature)
 {
+	// printf("In icp10100Calculate");
+
 	*pressure = 0;
 	*temperature = 0;
 //     // calculate

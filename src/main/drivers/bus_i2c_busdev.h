@@ -24,6 +24,7 @@ bool i2cBusWriteRegister(const extDevice_t *dev, uint8_t reg, uint8_t data);
 bool i2cBusWriteRegisterStart(const extDevice_t *dev, uint8_t reg, uint8_t data);
 bool i2cBusWriteCommand16(const extDevice_t *dev, uint16_t cmd);
 bool i2cBusWriteRegisterBuffer16(const extDevice_t *dev, uint16_t reg, uint8_t *data, uint8_t length);
+bool i2cBusReadBuffer(const extDevice_t *dev, uint8_t *data, uint8_t length);
 bool i2cBusReadRegisterBuffer(const extDevice_t *dev, uint8_t reg, uint8_t *data, uint8_t length);
 bool i2cBusReadRegisterBuffer16(const extDevice_t *dev, uint16_t reg, uint8_t *data, uint8_t length);
 uint8_t i2cBusReadRegister(const extDevice_t *dev, uint8_t reg);

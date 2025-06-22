@@ -158,6 +158,16 @@ bool i2cReadBuffer(I2CDevice device, uint8_t addr_, uint8_t reg_, uint8_t len, u
     return true;
 }
 
+bool i2cRawReadBuffer(I2CDevice device, uint8_t addr_, uint8_t len, uint8_t* buf)
+{
+	if (i2cBusAddr[device] != addr_) {
+        sl_client_set_address_i2c_bus(device, addr_);
+        i2cBusAddr[device] = addr_;
+	}
+
+    return (sl_client_i2c_transfer(device, NULL, 0, buf, len) == 0);
+}
+
 bool i2cBusy(I2CDevice device, bool *error)
 {
     (void) device;
