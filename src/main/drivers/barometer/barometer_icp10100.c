@@ -55,60 +55,6 @@
 #define ICP10100_LN_MEASURE_CMD                (0x70df)
 #define ICP10100_ULN_MEASURE_CMD               (0x7866)
 
-
-// #define ICP10100_STAT_REG                      (0xF3)  /* Status Register */
-// #define ICP10100_CTRL_MEAS_REG                 (0xF4)  /* Ctrl Measure Register */
-// #define ICP10100_CONFIG_REG                    (0xF5)  /* Configuration Register */
-// #define ICP10100_PRESSURE_MSB_REG              (0xF7)  /* Pressure MSB Register */
-// #define ICP10100_PRESSURE_LSB_REG              (0xF8)  /* Pressure LSB Register */
-// #define ICP10100_PRESSURE_XLSB_REG             (0xF9)  /* Pressure XLSB Register */
-// #define ICP10100_TEMPERATURE_MSB_REG           (0xFA)  /* Temperature MSB Reg */
-// #define ICP10100_TEMPERATURE_LSB_REG           (0xFB)  /* Temperature LSB Reg */
-// #define ICP10100_TEMPERATURE_XLSB_REG          (0xFC)  /* Temperature XLSB Reg */
-// #define ICP10100_FORCED_MODE                   (0x01)
-// 
-// #define ICP10100_TEMPERATURE_CALIB_DIG_T1_LSB_REG             (0x88)
-// #define ICP10100_PRESSURE_TEMPERATURE_CALIB_DATA_LENGTH       (24)
-// #define ICP10100_DATA_FRAME_SIZE               (6)
-// 
-// #define ICP10100_OVERSAMP_SKIPPED          (0x00)
-// #define ICP10100_OVERSAMP_1X               (0x01)
-// #define ICP10100_OVERSAMP_2X               (0x02)
-// #define ICP10100_OVERSAMP_4X               (0x03)
-// #define ICP10100_OVERSAMP_8X               (0x04)
-// #define ICP10100_OVERSAMP_16X              (0x05)
-// 
-// // configure pressure and temperature oversampling, forced sampling mode
-// #define ICP10100_PRESSURE_OSR              (ICP10100_OVERSAMP_8X)
-// #define ICP10100_TEMPERATURE_OSR           (ICP10100_OVERSAMP_1X)
-// #define ICP10100_MODE                      (ICP10100_PRESSURE_OSR << 2 | ICP10100_TEMPERATURE_OSR << 5 | ICP10100_FORCED_MODE)
-// 
-// #define T_INIT_MAX                       (20)
-// // 20/16 = 1.25 ms
-// #define T_MEASURE_PER_OSRS_MAX           (37)
-// // 37/16 = 2.3125 ms
-// #define T_SETUP_PRESSURE_MAX             (10)
-// // 10/16 = 0.625 ms
-
-// typedef struct icp10100_calib_param_s {
-//     uint16_t dig_T1; /* calibration T1 data */
-//     int16_t dig_T2; /* calibration T2 data */
-//     int16_t dig_T3; /* calibration T3 data */
-//     uint16_t dig_P1; /* calibration P1 data */
-//     int16_t dig_P2; /* calibration P2 data */
-//     int16_t dig_P3; /* calibration P3 data */
-//     int16_t dig_P4; /* calibration P4 data */
-//     int16_t dig_P5; /* calibration P5 data */
-//     int16_t dig_P6; /* calibration P6 data */
-//     int16_t dig_P7; /* calibration P7 data */
-//     int16_t dig_P8; /* calibration P8 data */
-//     int16_t dig_P9; /* calibration P9 data */
-// } __attribute__((packed)) icp10100_calib_param_t; // packed as we read directly from the device into this structure.
-
-// STATIC_ASSERT(sizeof(icp10100_calib_param_t) == ICP10100_PRESSURE_TEMPERATURE_CALIB_DATA_LENGTH, icp10100_calibration_structure_incorrectly_packed);
-
-// STATIC_UNIT_TESTED int32_t t_fine; /* calibration t_fine data */
-
 static bool icp10100StartUT(baroDev_t *baro);
 static bool icp10100ReadUT(baroDev_t *baro);
 static bool icp10100GetUT(baroDev_t *baro);
@@ -285,7 +231,6 @@ static bool icp10100StartUP(baroDev_t *baro)
     // start measurement
     // Start sampling in ultra-low noise (ULN) mode
     busWriteCommand16(&baro->dev, ICP10100_ULN_MEASURE_CMD);
-    // busWriteCommand16(&baro->dev, ICP10100_LN_MEASURE_CMD);
 
 	// printf("In icp10100StartUP");
 
@@ -299,15 +244,17 @@ static bool icp10100ReadUP(baroDev_t *baro)
     }
 
     // read data from sensor
-	// TODO: This should just be the start call? See bmp388 driver
-    return busRawReadBuffer(&baro->dev, icp10100BarometerData, 9);
+    return busReadBufferStart(&baro->dev, icp10100BarometerData, 9);
 }
 
 static bool icp10100GetUP(baroDev_t *baro)
 {
-	(void) baro;
+	// Wait until we know the transaction has been completed
+    if (busBusy(&baro->dev, NULL)) {
+        return false;
+    }
+
     return true;
-	// TODO: This should wait for busBusy to be false then copy over the data?
 }
 
 static void icp10100Calculate(int32_t *pressure, int32_t *temperature)

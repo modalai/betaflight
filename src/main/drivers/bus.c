@@ -52,18 +52,6 @@ bool busRawWriteRegisterStart(const extDevice_t *dev, uint8_t reg, uint8_t data)
     }
 }
 
-bool busRawReadBuffer(const extDevice_t *dev, uint8_t *data, uint8_t length)
-{
-#ifdef USE_SPI
-    if (dev->bus->busType ==  BUS_TYPE_SPI) {
-        return false;
-    } else
-#endif
-    {
-        return i2cBusReadBuffer(dev, data, length);
-    }
-}
-
 bool busRawReadRegisterBuffer(const extDevice_t *dev, uint8_t reg, uint8_t *data, uint8_t length)
 {
 #ifdef USE_SPI
@@ -85,6 +73,18 @@ bool busRawReadRegisterBufferStart(const extDevice_t *dev, uint8_t reg, uint8_t 
 #endif
     {
         return busReadRegisterBufferStart(dev, reg, data, length);
+    }
+}
+
+bool busReadBufferStart(const extDevice_t *dev, uint8_t *data, uint8_t length)
+{
+#ifdef USE_SPI
+    if (dev->bus->busType ==  BUS_TYPE_SPI) {
+        return false;
+    } else
+#endif
+    {
+        return i2cBusReadBufferStart(dev, data, length);
     }
 }
 

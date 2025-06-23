@@ -145,7 +145,6 @@ void targetBusInit(void);
 // Access routines where the register is accessed directly
 bool busRawWriteRegister(const extDevice_t *dev, uint8_t reg, uint8_t data);
 bool busRawWriteRegisterStart(const extDevice_t *dev, uint8_t reg, uint8_t data);
-bool busRawReadBuffer(const extDevice_t *dev, uint8_t *data, uint8_t length);
 bool busRawReadRegisterBuffer(const extDevice_t *dev, uint8_t reg, uint8_t *data, uint8_t length);
 bool busRawReadRegisterBufferStart(const extDevice_t *dev, uint8_t reg, uint8_t *data, uint8_t length);
 // Write routines where the register is masked with 0x7f
@@ -158,6 +157,8 @@ bool busReadRegisterBuffer(const extDevice_t *dev, uint8_t reg, uint8_t *data, u
 bool busReadRegisterBuffer16(const extDevice_t *dev, uint16_t reg, uint8_t *data, uint8_t length);
 bool busReadRegisterBufferStart(const extDevice_t *dev, uint8_t reg, uint8_t *data, uint8_t length);
 uint8_t busReadRegister(const extDevice_t *dev, uint8_t reg);
+// Read routine without a register
+bool busReadBufferStart(const extDevice_t *dev, uint8_t *data, uint8_t length);
 
 bool busBusy(const extDevice_t *dev, bool *error);
 void busDeviceRegister(const extDevice_t *dev);

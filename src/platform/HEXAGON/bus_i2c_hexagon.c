@@ -46,22 +46,22 @@ const i2cHardware_t i2cHardware[1];
 
 i2cDevice_t i2cDevice[1];
 
-static sem_t read_semaphore;
-static bool dataReadInitiated;
-static bool dataReady;
-static uint8_t barometerData[9];
-static bool readThreadStarted;
+static sem_t barometerReadSemaphore;
+static bool barometerDataReady;
+static uint8_t *barometerData;
+static uint8_t barometerDataLen;
+static bool barometerReadThreadStarted;
 
-void *read_thread(void *arg)
+void *barometerReadThread(void *arg)
 {
 	(void) arg;
 
-	printf("i2c read thread starting");
+	printf("Barometer i2c read thread starting");
 
 	while (true) {
-		sem_wait(&read_semaphore);
-    	(void) sl_client_i2c_transfer(2, NULL, 0, barometerData, 9);
-		dataReady = true;
+		sem_wait(&barometerReadSemaphore);
+    	(void) sl_client_i2c_transfer(BARO_I2C_INSTANCE, NULL, 0, barometerData, barometerDataLen);
+		barometerDataReady = true;
 	}
 
 	return NULL;
@@ -82,9 +82,9 @@ void i2cInit(I2CDevice device)
 	int fd = sl_client_config_i2c_bus(busDevice, 0, 100);
 	printf("I2C %d %d FD %d", device, busDevice, fd);
 
-	if (!readThreadStarted) {
+	if (!barometerReadThreadStarted) {
 		// Initialize the binary semaphore for inter-thread use, with an initial value of 1
-		int result = sem_init(&read_semaphore, 0, 0);
+		int result = sem_init(&barometerReadSemaphore, 0, 0);
 		if (result != 0) {
 		    perror("Semaphore initialization failed");
 		    // Handle error
@@ -103,10 +103,10 @@ void i2cInit(I2CDevice device)
 	    pthread_attr_setstacksize(&attr, stack_size);
 
 		pthread_t ctx = 0;
-	    pthread_create(&ctx, &attr, &read_thread, NULL);
+	    pthread_create(&ctx, &attr, &barometerReadThread, NULL);
 	    pthread_attr_destroy(&attr);
 
-		readThreadStarted = true;
+		barometerReadThreadStarted = true;
 	}
 }
 
@@ -137,10 +137,10 @@ bool i2cWriteCommand16(I2CDevice device, uint8_t addr_, uint16_t cmd_)
         i2cBusAddr[device] = addr_;
 	}
 
-	uint8_t buff[2];
-	buff[0] = (cmd_ >> 8) & 0xff;
-	buff[1] = cmd_ & 0xff;
-    return (sl_client_i2c_transfer(device, buff, 2, NULL, 0) == 0);
+	uint8_t buf[2];
+	buf[0] = (cmd_ >> 8) & 0xff;
+	buf[1] = cmd_ & 0xff;
+    return (sl_client_i2c_transfer(device, buf, 2, NULL, 0) == 0);
 }
 
 // Non-blocking write
@@ -192,10 +192,10 @@ bool i2cRead16(I2CDevice device, uint8_t addr_, uint16_t reg_, uint8_t len, uint
         i2cBusAddr[device] = addr_;
 	}
 
-	uint8_t buff[2];
-	buff[0] = (reg_ >> 8) & 0xff;
-	buff[1] = reg_ & 0xff;
-    return (sl_client_i2c_transfer(device, buff, 2, (uint8_t*) buf, len) == 0);
+	uint8_t regBuf[2];
+	regBuf[0] = (reg_ >> 8) & 0xff;
+	regBuf[1] = reg_ & 0xff;
+    return (sl_client_i2c_transfer(device, regBuf, 2, buf, len) == 0);
 }
 
 // Non-blocking read
@@ -209,25 +209,22 @@ bool i2cReadBuffer(I2CDevice device, uint8_t addr_, uint8_t reg_, uint8_t len, u
     return true;
 }
 
-bool i2cRawReadBuffer(I2CDevice device, uint8_t addr_, uint8_t len, uint8_t* buf)
+bool i2cReadBufferNoRegister(I2CDevice device, uint8_t addr_, uint8_t len, uint8_t* buf)
 {
 	if (i2cBusAddr[device] != addr_) {
         sl_client_set_address_i2c_bus(device, addr_);
         i2cBusAddr[device] = addr_;
 	}
 
-	if (!dataReadInitiated) {
-		dataReady = false;
-		sem_post(&read_semaphore);
-		dataReadInitiated = true;
+	if (device == BARO_I2C_INSTANCE) {
+		if (!i2cBusBusy[BARO_I2C_INSTANCE]) {
+			barometerDataReady = false;
+			barometerData = buf;
+			barometerDataLen = len;
+			i2cBusBusy[BARO_I2C_INSTANCE] = true;
+			sem_post(&barometerReadSemaphore);
+		}
 	}
-
-	if (!dataReady) {
-		return false;
-	}
-
-	memcpy(buf, barometerData, len);
-	dataReadInitiated = false;
 
 	return true;
 }
@@ -235,6 +232,13 @@ bool i2cRawReadBuffer(I2CDevice device, uint8_t addr_, uint8_t len, uint8_t* buf
 bool i2cBusy(I2CDevice device, bool *error)
 {
 	if (error) *error = false;
+
+	if (device == BARO_I2C_INSTANCE) {
+		if (barometerDataReady) {
+			i2cBusBusy[BARO_I2C_INSTANCE] = false;
+		}
+	}
+
 	return i2cBusBusy[device];
 }
 
