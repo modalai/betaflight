@@ -66,23 +66,6 @@ static void icp10100Calculate(int32_t *pressure, int32_t *temperature);
 static int16_t _scal[ICP10100_NUM_OTP_SCAL];
 static uint8_t icp10100BarometerData[9];
 
-static uint16_t icp10100_chip_id = 0;
-
-// STATIC_UNIT_TESTED icp10100_calib_param_t icp10100_cal;
-// uncompensated pressure and temperature
-// int32_t icp10100_up = 0;
-// int32_t icp10100_ut = 0;
-// static DMA_DATA_ZERO_INIT uint8_t sensor_data[ICP10100_DATA_FRAME_SIZE];
-
-// static bool icp10100StartUT(baroDev_t *baro);
-// static bool icp10100ReadUT(baroDev_t *baro);
-// static bool icp10100GetUT(baroDev_t *baro);
-// static bool icp10100StartUP(baroDev_t *baro);
-// static bool icp10100ReadUP(baroDev_t *baro);
-// static bool icp10100GetUP(baroDev_t *baro);
-
-// STATIC_UNIT_TESTED void icp10100Calculate(int32_t *pressure, int32_t *temperature);
-
 static int8_t cal_crc(uint8_t seed, uint8_t data)
 {
 	int8_t poly = 0x31;
@@ -105,6 +88,22 @@ static int8_t cal_crc(uint8_t seed, uint8_t data)
 	return (int8_t)seed;
 }
 
+static bool validateChipId(extDevice_t *dev)
+{
+	uint16_t readChipId = 0;
+
+    busReadRegisterBuffer16(dev, ICP10100_CHIP_ID_REG, (uint8_t*) &readChipId, 2);  /* read Chip Id */
+
+	uint8_t chipId = (readChipId >> 8) & 0x3f;
+	if (chipId != ICP10100_DEFAULT_CHIP_ID) {
+		printf("Didn't detect icp10100");
+        return false;
+    }
+
+	printf("Detected icp10100!!!");
+	return true;
+}
+
 bool icp10100Detect(baroDev_t *baro)
 {
     extDevice_t *dev = &baro->dev;
@@ -116,18 +115,11 @@ bool icp10100Detect(baroDev_t *baro)
         defaultAddressApplied = true;
     }
 
-    busReadRegisterBuffer16(dev, ICP10100_CHIP_ID_REG, (uint8_t*) &icp10100_chip_id, 2);  /* read Chip Id */
-
-	uint8_t chipId = (icp10100_chip_id >> 8) & 0x3f;
-
-	if (chipId != ICP10100_DEFAULT_CHIP_ID) {
+	if (!validateChipId(dev)) {
         if (defaultAddressApplied) {
             dev->busType_u.i2c.address = 0;
         }
-		printf("Didn't detect icp10100");
-        return false;
-    } else {
-		printf("Detected icp10100!!!");
+		return false;
 	}
 
     busDeviceRegister(dev);
@@ -136,25 +128,17 @@ bool icp10100Detect(baroDev_t *baro)
 
 	delay(100);
 
-    busReadRegisterBuffer16(dev, ICP10100_CHIP_ID_REG, (uint8_t*) &icp10100_chip_id, 2);  /* read Chip Id */
-
-	chipId = (icp10100_chip_id >> 8) & 0x3f;
-
-	if (chipId != ICP10100_DEFAULT_CHIP_ID) {
+	if (!validateChipId(dev)) {
         if (defaultAddressApplied) {
             dev->busType_u.i2c.address = 0;
         }
-		printf("Didn't detect icp10100 after reset");
-        return false;
-    } else {
-		printf("Detected icp10100 after reset!!!");
+		return false;
 	}
 	
     // read OTP
 	uint8_t addrOTPCmd[ICP10100_OTP_ADDR_LEN] = {0x00, 0x66, 0x9c};
 	uint8_t otpBuf[ICP10100_OTP_SCAL_LEN];
 	uint8_t crc;
-	// bool success = true;
 
     busWriteRegisterBuffer16(dev, ICP10100_SET_ADDR_CMD, addrOTPCmd, ICP10100_OTP_ADDR_LEN);
 	
@@ -179,7 +163,6 @@ bool icp10100Detect(baroDev_t *baro)
 
     // Start sampling in ultra-low noise (ULN) mode
     busWriteCommand16(dev, ICP10100_ULN_MEASURE_CMD);
-    // busWriteCommand16(dev, ICP10100_LN_MEASURE_CMD);
 	
     // these are dummy as temperature is measured as part of pressure
     baro->combined_read = true;
@@ -191,8 +174,7 @@ bool icp10100Detect(baroDev_t *baro)
     baro->start_up = icp10100StartUP;
     baro->get_up = icp10100GetUP;
     baro->read_up = icp10100ReadUP;
-    baro->up_delay = 96 * 1000;  // 95ms ultra low noise (but 65ms is max)
-    // baro->up_delay = 26 * 1000;  // 26ms low noise
+    baro->up_delay = 96 * 1000;  // 96ms for ultra low noise measurement
     baro->calculate = icp10100Calculate;
 
     return true;
@@ -203,8 +185,6 @@ static bool icp10100StartUT(baroDev_t *baro)
     UNUSED(baro);
     // dummy
 
-	printf("In icp10100StartUT");
-
     return true;
 }
 
@@ -212,7 +192,6 @@ static bool icp10100ReadUT(baroDev_t *baro)
 {
     UNUSED(baro);
     // dummy
-	printf("In icp10100ReadUT");
 
     return true;
 }
@@ -221,7 +200,6 @@ static bool icp10100GetUT(baroDev_t *baro)
 {
     UNUSED(baro);
     // dummy
-	printf("In icp10100GetUT");
 
     return true;
 }
@@ -231,8 +209,6 @@ static bool icp10100StartUP(baroDev_t *baro)
     // start measurement
     // Start sampling in ultra-low noise (ULN) mode
     busWriteCommand16(&baro->dev, ICP10100_ULN_MEASURE_CMD);
-
-	// printf("In icp10100StartUP");
 
 	return true;
 }
@@ -259,8 +235,6 @@ static bool icp10100GetUP(baroDev_t *baro)
 
 static void icp10100Calculate(int32_t *pressure, int32_t *temperature)
 {
-	// printf("In icp10100Calculate");
-
 	uint16_t _raw_t = (icp10100BarometerData[0] << 8) | icp10100BarometerData[1];
 	uint32_t L_res_buf3 = icp10100BarometerData[3];	// expand result bytes to 32bit to fix issues on 8-bit MCUs
 	uint32_t L_res_buf4 = icp10100BarometerData[4];
