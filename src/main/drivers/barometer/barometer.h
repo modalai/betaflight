@@ -35,7 +35,7 @@ typedef struct baroDev_s {
     extiCallbackRec_t exti;
     bool combined_read;
     uint16_t ut_delay;
-    uint16_t up_delay;
+    uint32_t up_delay;
     baroOpFuncPtr start_ut;
     baroGetFuncPtr read_ut;
     baroGetFuncPtr get_ut;

@@ -23,6 +23,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+#include <pthread.h>
+#include <semaphore.h>
 
 #include "platform.h"
 
@@ -38,10 +40,32 @@
 
 static uint8_t i2cBusAddr[3];
 static uint8_t i2cBusMap[3] = {1, 2, 5};
+static bool i2cBusBusy[3];
 
 const i2cHardware_t i2cHardware[1];
 
 i2cDevice_t i2cDevice[1];
+
+static sem_t read_semaphore;
+static bool dataReadInitiated;
+static bool dataReady;
+static uint8_t barometerData[9];
+static bool readThreadStarted;
+
+void *read_thread(void *arg)
+{
+	(void) arg;
+
+	printf("i2c read thread starting");
+
+	while (true) {
+		sem_wait(&read_semaphore);
+    	(void) sl_client_i2c_transfer(2, NULL, 0, barometerData, 9);
+		dataReady = true;
+	}
+
+	return NULL;
+}
 
 /*
   4 I2C buses
@@ -57,6 +81,33 @@ void i2cInit(I2CDevice device)
 
 	int fd = sl_client_config_i2c_bus(busDevice, 0, 100);
 	printf("I2C %d %d FD %d", device, busDevice, fd);
+
+	if (!readThreadStarted) {
+		// Initialize the binary semaphore for inter-thread use, with an initial value of 1
+		int result = sem_init(&read_semaphore, 0, 0);
+		if (result != 0) {
+		    perror("Semaphore initialization failed");
+		    // Handle error
+		}
+
+		// Create i2c asynchronous read thread
+	    int i2c_rx_priority = sched_get_priority_max(SCHED_FIFO) - 21;
+	    printf("Setting i2c rx pthread priority to %d", i2c_rx_priority);
+
+	    struct sched_param param = { .sched_priority = i2c_rx_priority };
+	    pthread_attr_t attr;
+	    pthread_attr_init(&attr);
+	    pthread_attr_setschedparam(&attr, &param);
+		
+	    const uint32_t stack_size = 4096U;
+	    pthread_attr_setstacksize(&attr, stack_size);
+
+		pthread_t ctx = 0;
+	    pthread_create(&ctx, &attr, &read_thread, NULL);
+	    pthread_attr_destroy(&attr);
+
+		readThreadStarted = true;
+	}
 }
 
 void i2cPinConfigure(const struct i2cConfig_s *i2cConfig)
@@ -165,13 +216,25 @@ bool i2cRawReadBuffer(I2CDevice device, uint8_t addr_, uint8_t len, uint8_t* buf
         i2cBusAddr[device] = addr_;
 	}
 
-    return (sl_client_i2c_transfer(device, NULL, 0, buf, len) == 0);
+	if (!dataReadInitiated) {
+		dataReady = false;
+		sem_post(&read_semaphore);
+		dataReadInitiated = true;
+	}
+
+	if (!dataReady) {
+		return false;
+	}
+
+	memcpy(buf, barometerData, len);
+	dataReadInitiated = false;
+
+	return true;
 }
 
 bool i2cBusy(I2CDevice device, bool *error)
 {
-    (void) device;
-    (void) error;
-    return false;
+	if (error) *error = false;
+	return i2cBusBusy[device];
 }
 

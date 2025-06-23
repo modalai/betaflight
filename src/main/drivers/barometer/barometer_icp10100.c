@@ -21,6 +21,8 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
+#include <math.h>
 
 #include "platform.h"
 
@@ -116,6 +118,7 @@ static bool icp10100GetUP(baroDev_t *baro);
 static void icp10100Calculate(int32_t *pressure, int32_t *temperature);
 
 static int16_t _scal[ICP10100_NUM_OTP_SCAL];
+static uint8_t icp10100BarometerData[9];
 
 static uint16_t icp10100_chip_id = 0;
 
@@ -229,8 +232,8 @@ bool icp10100Detect(baroDev_t *baro)
 	}
 
     // Start sampling in ultra-low noise (ULN) mode
-    // busWriteCommand16(dev, ICP10100_ULN_MEASURE_CMD);
-    busWriteCommand16(dev, ICP10100_LN_MEASURE_CMD);
+    busWriteCommand16(dev, ICP10100_ULN_MEASURE_CMD);
+    // busWriteCommand16(dev, ICP10100_LN_MEASURE_CMD);
 	
     // these are dummy as temperature is measured as part of pressure
     baro->combined_read = true;
@@ -242,8 +245,8 @@ bool icp10100Detect(baroDev_t *baro)
     baro->start_up = icp10100StartUP;
     baro->get_up = icp10100GetUP;
     baro->read_up = icp10100ReadUP;
-    // baro->up_delay = 95 * 1000;  // 95ms ultra low noise (but 65ms is max)
-    baro->up_delay = 26 * 1000;  // 26ms low noise
+    baro->up_delay = 96 * 1000;  // 95ms ultra low noise (but 65ms is max)
+    // baro->up_delay = 26 * 1000;  // 26ms low noise
     baro->calculate = icp10100Calculate;
 
     return true;
@@ -281,8 +284,8 @@ static bool icp10100StartUP(baroDev_t *baro)
 {
     // start measurement
     // Start sampling in ultra-low noise (ULN) mode
-    // busWriteCommand16(&baro->dev, ICP10100_ULN_MEASURE_CMD);
-    busWriteCommand16(&baro->dev, ICP10100_LN_MEASURE_CMD);
+    busWriteCommand16(&baro->dev, ICP10100_ULN_MEASURE_CMD);
+    // busWriteCommand16(&baro->dev, ICP10100_LN_MEASURE_CMD);
 
 	// printf("In icp10100StartUP");
 
@@ -291,83 +294,61 @@ static bool icp10100StartUP(baroDev_t *baro)
 
 static bool icp10100ReadUP(baroDev_t *baro)
 {
-	// printf("In icp10100ReadUP");
-
     if (busBusy(&baro->dev, NULL)) {
         return false;
     }
 
     // read data from sensor
-	// uint8_t comp_data[9] = {};
-    // return busRawReadBuffer(&baro->dev, comp_data, 9);
-    return true;
+	// TODO: This should just be the start call? See bmp388 driver
+    return busRawReadBuffer(&baro->dev, icp10100BarometerData, 9);
 }
 
 static bool icp10100GetUP(baroDev_t *baro)
 {
-	// printf("In icp10100GetUP");
-
-    if (busBusy(&baro->dev, NULL)) {
-        return false;
-    }
-
-    // icp10100_up = (int32_t)(sensor_data[0] << 12 | sensor_data[1] << 4 | sensor_data[2] >> 4);
-    // icp10100_ut = (int32_t)(sensor_data[3] << 12 | sensor_data[4] << 4 | sensor_data[5] >> 4);
-	
+	(void) baro;
     return true;
+	// TODO: This should wait for busBusy to be false then copy over the data?
 }
-
-// // Returns temperature in DegC, resolution is 0.01 DegC. Output value of "5123" equals 51.23 DegC
-// // t_fine carries fine temperature as global value
-// static int32_t icp10100CompensateTemperature(int32_t adc_T)
-// {
-// //     int32_t var1, var2, T;
-// // 
-// //     var1 = ((((adc_T >> 3) - ((int32_t)icp10100_cal.dig_T1 << 1))) * ((int32_t)icp10100_cal.dig_T2)) >> 11;
-// //     var2  = (((((adc_T >> 4) - ((int32_t)icp10100_cal.dig_T1)) * ((adc_T >> 4) - ((int32_t)icp10100_cal.dig_T1))) >> 12) * ((int32_t)icp10100_cal.dig_T3)) >> 14;
-// //     t_fine = var1 + var2;
-// //     T = (t_fine * 5 + 128) >> 8;
-// // 
-// //     return T;
-// }
-
-// // Returns pressure in Pa as unsigned 32 bit integer in Q24.8 format (24 integer bits and 8 fractional bits).
-// // Output value of "24674867" represents 24674867/256 = 96386.2 Pa = 963.862 hPa
-// static uint32_t icp10100CompensatePressure(int32_t adc_P)
-// {
-// //     int64_t var1, var2, p;
-// //     var1 = ((int64_t)t_fine) - 128000;
-// //     var2 = var1 * var1 * (int64_t)icp10100_cal.dig_P6;
-// //     var2 = var2 + ((var1*(int64_t)icp10100_cal.dig_P5) << 17);
-// //     var2 = var2 + (((int64_t)icp10100_cal.dig_P4) << 35);
-// //     var1 = ((var1 * var1 * (int64_t)icp10100_cal.dig_P3) >> 8) + ((var1 * (int64_t)icp10100_cal.dig_P2) << 12);
-// //     var1 = (((((int64_t)1) << 47) + var1)) * ((int64_t)icp10100_cal.dig_P1) >> 33;
-// //     if (var1 == 0)
-// //         return 0;
-// //     p = 1048576 - adc_P;
-// //     p = (((p << 31) - var2) * 3125) / var1;
-// //     var1 = (((int64_t)icp10100_cal.dig_P9) * (p >> 13) * (p >> 13)) >> 25;
-// //     var2 = (((int64_t)icp10100_cal.dig_P8) * p) >> 19;
-// //     p = ((p + var1 + var2) >> 8) + (((int64_t)icp10100_cal.dig_P7) << 4);
-// //     return (uint32_t)p;
-// }
 
 static void icp10100Calculate(int32_t *pressure, int32_t *temperature)
 {
 	// printf("In icp10100Calculate");
 
-	*pressure = 0;
-	*temperature = 0;
-//     // calculate
-//     int32_t t;
-//     uint32_t p;
-//     t = icp10100CompensateTemperature(icp10100_ut);
-//     p = icp10100CompensatePressure(icp10100_up);
-// 
-//     if (pressure)
-//         *pressure = (int32_t)(p / 256);
-//     if (temperature)
-//         *temperature = t;
+	uint16_t _raw_t = (icp10100BarometerData[0] << 8) | icp10100BarometerData[1];
+	uint32_t L_res_buf3 = icp10100BarometerData[3];	// expand result bytes to 32bit to fix issues on 8-bit MCUs
+	uint32_t L_res_buf4 = icp10100BarometerData[4];
+	uint32_t L_res_buf6 = icp10100BarometerData[6];
+	uint32_t _raw_p = (L_res_buf3 << 16) | (L_res_buf4 << 8) | L_res_buf6;
+
+	// constants for presure calculation
+	static float _pcal[3] = { 45000.0, 80000.0, 105000.0 };
+	static float _lut_lower = 3.5 * 0x100000;	// 1<<20
+	static float _lut_upper = 11.5 * 0x100000;	// 1<<20
+	static float _quadr_factor = 1 / 16777216.0;
+	static float _offst_factor = 2048.0;
+
+	// calculate temperature
+	float _temperature_C = -45.f + 175.f / 65536.f * _raw_t;
+
+	// calculate pressure
+	float t = (float)(_raw_t - 32768);
+	float s1 = _lut_lower + (float)(_scal[0] * t * t) * _quadr_factor;
+	float s2 = _offst_factor * _scal[3] + (float)(_scal[1] * t * t) * _quadr_factor;
+	float s3 = _lut_upper + (float)(_scal[2] * t * t) * _quadr_factor;
+	float c = (s1 * s2 * (_pcal[0] - _pcal[1]) +
+		   s2 * s3 * (_pcal[1] - _pcal[2]) +
+		   s3 * s1 * (_pcal[2] - _pcal[0])) /
+		  (s3 * (_pcal[0] - _pcal[1]) +
+		   s1 * (_pcal[1] - _pcal[2]) +
+		   s2 * (_pcal[2] - _pcal[0]));
+	float a = (_pcal[0] * s1 - _pcal[1] * s2 - (_pcal[1] - _pcal[0]) * c) / (s1 - s2);
+	float b = (_pcal[0] - a) * (s1 + c);
+	float _pressure_Pa = a + b / (c + _raw_p);
+
+	*pressure = (int32_t) round((double)(_pressure_Pa * 256.0f));
+	*temperature = (int32_t) (_temperature_C * 100.0f);
+
+	// printf("Pressure: %f Pa, temp: %f C", (double) *pressure / 256.0, (double) *temperature / 100.0);
 }
 
 #endif
