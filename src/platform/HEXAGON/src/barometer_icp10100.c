@@ -283,10 +283,10 @@ static void icp10100Calculate(int32_t *pressure, int32_t *temperature)
 	float b = (_pcal[0] - a) * (s1 + c);
 	float _pressure_Pa = a + b / (c + _raw_p);
 
-	*pressure = (int32_t) round((double)(_pressure_Pa * 256.0f));
+	*pressure = (int32_t) _pressure_Pa;
 	*temperature = (int32_t) (_temperature_C * 100.0f);
 
-	// printf("Pressure: %f Pa, temp: %f C", (double) *pressure / 256.0, (double) *temperature / 100.0);
+	// printf("Pressure: %f hPa, temp: %f C", (double) *pressure, (double) (*temperature / 100.0f));
 }
 
 #endif
