@@ -99,6 +99,9 @@ if __name__ == "__main__":
             print("Port must be an integer.")
             sys.exit(1)
 
-    subprocess.run(['adb', 'forward', 'tcp:8766', 'tcp:8765'])
+    if _target_addr == '127.0.0.1' and _target_port == 8766:
+        subprocess.run(['adb', 'forward', 'tcp:8766', 'tcp:8765'])
+    else:
+        print('Trying to connect to ' + _target_addr + ' port ' + str(_target_port))
 
     asyncio.run(main())
