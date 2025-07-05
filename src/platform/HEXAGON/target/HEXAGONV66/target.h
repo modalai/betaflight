@@ -131,7 +131,7 @@ extern size_t strnlen(const char s[], size_t maxlen);
 #undef USE_DMA
 
 #define DEFAULT_RX_FEATURE      FEATURE_RX_SERIAL
-#define DEFAULT_FEATURES        (FEATURE_GPS | FEATURE_TELEMETRY | FEATURE_ESC_SENSOR)
+#define DEFAULT_FEATURES        (FEATURE_GPS | FEATURE_TELEMETRY | FEATURE_ESC_SENSOR | FEATURE_OSD)
 
 #define USE_PARAMETER_GROUPS
 
@@ -149,6 +149,7 @@ extern size_t strnlen(const char s[], size_t maxlen);
 #define USE_OSD
 #define USE_MSP_DISPLAYPORT
 #define USE_OSD_OVER_MSP_DISPLAYPORT
+#define USE_OSD_HD
 #undef USE_RX_PPM
 #undef USE_RX_PWM
 #undef USE_SERIALRX_GHST
