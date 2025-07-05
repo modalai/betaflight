@@ -2,13 +2,14 @@
 # Hexagon v66 Make file include
 #
 
-HEXAGON_SDK_DIR = /opt/hexagon-sdk/4.1.0.4-lite
+HEXAGON_SDK_DIR = /home/4.1.0.4
 INCLUDE_DIRS += $(HEXAGON_SDK_DIR)/rtos/qurt/computev66/include/qurt \
                 $(HEXAGON_SDK_DIR)/rtos/qurt/computev66/include/posix
 
 INCLUDE_DIRS    := $(INCLUDE_DIRS) \
                    $(TARGET_PLATFORM_DIR) \
-				   $(TARGET_PLATFORM_DIR)/include
+				   $(TARGET_PLATFORM_DIR)/include \
+				   /home/4.1.0.4/rtos/qurt/computev66/include
 
 MCU_FLASH_SIZE	:= 8192
 

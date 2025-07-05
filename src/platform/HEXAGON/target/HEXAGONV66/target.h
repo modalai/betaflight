@@ -27,7 +27,7 @@
 
 #include "common/utils.h"
 
-#include "/opt/hexagon-sdk/4.1.0.4-lite/rtos/qurt/computev66/include/qurt/qurt_timer.h"
+#include "qurt/qurt_timer.h"
 
 
 #define USE_I2C_OLED_DISPLAY
