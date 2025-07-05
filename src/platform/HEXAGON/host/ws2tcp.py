@@ -18,6 +18,7 @@ import asyncio
 from websockets.asyncio.server import serve
 import websockets
 import logging
+import subprocess
 
 _reader = None
 _writer = None
@@ -80,18 +81,24 @@ async def main():
 
 
 if __name__ == "__main__":
-    # global _target_addr
-    # global _target_port
 
-    if len(sys.argv) != 3:
-        print(f"Usage: python {sys.argv[0]} <IP> <PORT>")
-        sys.exit(1)
+    # Setup default IP address and port
+    _target_addr = '127.0.0.1'
+    _target_port = 8766
 
-    _target_addr = sys.argv[1]
-    try:
-        _target_port = int(sys.argv[2])
-    except ValueError:
-        print("Port must be an integer.")
-        sys.exit(1)
+    if len(sys.argv) > 3:
+        print('ERROR, too many arguments. Max command ws2tcp <IP> <PORT>')
+
+    if len(sys.argv) >= 2:
+        _target_addr = sys.argv[1]
+
+    if len(sys.argv) == 3:
+        try:
+            _target_port = int(sys.argv[2])
+        except ValueError:
+            print("Port must be an integer.")
+            sys.exit(1)
+
+    subprocess.run(['adb', 'forward', 'tcp:8766', 'tcp:8765'])
 
     asyncio.run(main())
