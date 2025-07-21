@@ -60,7 +60,7 @@ void *barometerReadThread(void *arg)
 
 	while (true) {
 		sem_wait(&barometerReadSemaphore);
-    	(void) sl_client_i2c_transfer(BARO_I2C_INSTANCE, NULL, 0, barometerData, barometerDataLen);
+    	// (void) sl_client_i2c_transfer(BARO_I2C_INSTANCE, NULL, 0, barometerData, barometerDataLen);
 		barometerDataReady = true;
 	}
 
@@ -79,7 +79,8 @@ void i2cInit(I2CDevice device)
 {
 	int busDevice = i2cBusMap[device];
 
-	int fd = sl_client_config_i2c_bus(busDevice, 0, 100);
+	// int fd = sl_client_config_i2c_bus(busDevice, 0, 100);
+	int fd = -1;
 	printf("I2C %d %d FD %d", device, busDevice, fd);
 
 	if (!barometerReadThreadStarted) {
@@ -132,15 +133,20 @@ bool i2cWrite(I2CDevice device, uint8_t addr_, uint8_t reg_, uint8_t data)
 
 bool i2cWriteCommand16(I2CDevice device, uint8_t addr_, uint16_t cmd_)
 {
-	if (i2cBusAddr[device] != addr_) {
-        sl_client_set_address_i2c_bus(device, addr_);
-        i2cBusAddr[device] = addr_;
-	}
-
-	uint8_t buf[2];
-	buf[0] = (cmd_ >> 8) & 0xff;
-	buf[1] = cmd_ & 0xff;
-    return (sl_client_i2c_transfer(device, buf, 2, NULL, 0) == 0);
+	(void) device;
+	(void) addr_;
+	(void) cmd_;
+	printf("In i2cWriteCommand16");
+	// if (i2cBusAddr[device] != addr_) {
+    //     sl_client_set_address_i2c_bus(device, addr_);
+    //     i2cBusAddr[device] = addr_;
+	// }
+	// 
+	// uint8_t buf[2];
+	// buf[0] = (cmd_ >> 8) & 0xff;
+	// buf[1] = cmd_ & 0xff;
+    // return (sl_client_i2c_transfer(device, buf, 2, NULL, 0) == 0);
+    return false;
 }
 
 // Non-blocking write
@@ -156,21 +162,28 @@ bool i2cWriteBuffer(I2CDevice device, uint8_t addr_, uint8_t reg_, uint8_t len_,
 
 bool i2cWriteBuffer16(I2CDevice device, uint8_t addr_, uint16_t reg_, uint8_t len_, uint8_t *data)
 {
-	if (len_ > 3) {
-		printf("ERROR: Cannot write %d bytes", len_);
-		return false;
-	}
-
-	if (i2cBusAddr[device] != addr_) {
-        sl_client_set_address_i2c_bus(device, addr_);
-        i2cBusAddr[device] = addr_;
-	}
-
-	uint8_t buf[5];
-	buf[0] = (reg_ >> 8) & 0xff;
-	buf[1] = reg_ & 0xff;
-	memcpy(&buf[2], data, len_);
-    return (sl_client_i2c_transfer(device, buf, len_ + 2, NULL, 0) == 0);
+	(void) device;
+	(void) addr_;
+	(void) reg_;
+	(void) len_;
+	(void) data;
+	printf("In i2cWriteBuffer16");
+	// if (len_ > 3) {
+	// 	printf("ERROR: Cannot write %d bytes", len_);
+	// 	return false;
+	// }
+	// 
+	// if (i2cBusAddr[device] != addr_) {
+    //     sl_client_set_address_i2c_bus(device, addr_);
+    //     i2cBusAddr[device] = addr_;
+	// }
+	// 
+	// uint8_t buf[5];
+	// buf[0] = (reg_ >> 8) & 0xff;
+	// buf[1] = reg_ & 0xff;
+	// memcpy(&buf[2], data, len_);
+    // return (sl_client_i2c_transfer(device, buf, len_ + 2, NULL, 0) == 0);
+	return false;
 }
 
 
@@ -187,15 +200,22 @@ bool i2cRead(I2CDevice device, uint8_t addr_, uint8_t reg_, uint8_t len, uint8_t
 
 bool i2cRead16(I2CDevice device, uint8_t addr_, uint16_t reg_, uint8_t len, uint8_t* buf)
 {
-	if (i2cBusAddr[device] != addr_) {
-        sl_client_set_address_i2c_bus(device, addr_);
-        i2cBusAddr[device] = addr_;
-	}
-
-	uint8_t regBuf[2];
-	regBuf[0] = (reg_ >> 8) & 0xff;
-	regBuf[1] = reg_ & 0xff;
-    return (sl_client_i2c_transfer(device, regBuf, 2, buf, len) == 0);
+	(void) device;
+	(void) addr_;
+	(void) reg_;
+	(void) len;
+	(void) buf;
+	printf("In i2cRead16");
+	// if (i2cBusAddr[device] != addr_) {
+    //     sl_client_set_address_i2c_bus(device, addr_);
+    //     i2cBusAddr[device] = addr_;
+	// }
+	// 
+	// uint8_t regBuf[2];
+	// regBuf[0] = (reg_ >> 8) & 0xff;
+	// regBuf[1] = reg_ & 0xff;
+    // return (sl_client_i2c_transfer(device, regBuf, 2, buf, len) == 0);
+	return false;
 }
 
 // Non-blocking read
@@ -212,7 +232,7 @@ bool i2cReadBuffer(I2CDevice device, uint8_t addr_, uint8_t reg_, uint8_t len, u
 bool i2cReadBufferNoRegister(I2CDevice device, uint8_t addr_, uint8_t len, uint8_t* buf)
 {
 	if (i2cBusAddr[device] != addr_) {
-        sl_client_set_address_i2c_bus(device, addr_);
+        // sl_client_set_address_i2c_bus(device, addr_);
         i2cBusAddr[device] = addr_;
 	}
 
@@ -239,6 +259,7 @@ bool i2cBusy(I2CDevice device, bool *error)
 		}
 	}
 
-	return i2cBusBusy[device];
+	// return i2cBusBusy[device];
+	return false;
 }
 
