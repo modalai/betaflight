@@ -106,8 +106,10 @@ extern size_t strnlen(const char s[], size_t maxlen);
 #define USE_MAG
 #define USE_VIRTUAL_MAG
 
-#define USE_BARO
-#define USE_BARO_ICP10100
+// #define USE_BARO
+#undef USE_BARO
+// #define USE_BARO_ICP10100
+#undef USE_BARO_ICP10100
 
 #define USE_GPS
 #define USE_GPS_UBLOX

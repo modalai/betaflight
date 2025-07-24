@@ -239,7 +239,7 @@ uint8_t hexagonSerialRead(serialPort_t *instance) {
 	} else if (uartFunction == UART_FUNCTION_HW) {
 		int hw_index = getUARTHWindex(port_number);
 		if (hw_index != -1) {
-			(void) sl_client_uart_read(uartHardware[hw_index].reg->fd, (char*) &byte_data, 1);
+			// (void) sl_client_uart_read(uartHardware[hw_index].reg->fd, (char*) &byte_data, 1);
 		}
 	} else {
 		printf("Unknown port in hexagonSerialRead %d", port_number);
@@ -407,8 +407,8 @@ void hexagonWriteBuf(serialPort_t *instance, const void *data, int count) {
 			osdPacketBufferIndex += count;
 		}
 	} else if (uartFunction == UART_FUNCTION_HW) {
-		int hw_index = getUARTHWindex(port_number);
-		(void) sl_client_uart_write(uartHardware[hw_index].reg->fd, (const char*) data, (const unsigned) count);
+		// int hw_index = getUARTHWindex(port_number);
+		// (void) sl_client_uart_write(uartHardware[hw_index].reg->fd, (const char*) data, (const unsigned) count);
 	}
 }
 

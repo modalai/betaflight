@@ -45,8 +45,7 @@ void spiInitDevice(SPIDevice device)
 
 	spiDevice[device].dev = &hexagon_spi_bus;
 
-	// hexagon_spi_bus.fd = sl_client_config_spi_bus();
-	hexagon_spi_bus.fd = -1;
+	hexagon_spi_bus.fd = sl_client_config_spi_bus();
 }
 
 // DMA transfer setup and start
@@ -136,11 +135,11 @@ void spiSequenceStart(const extDevice_t *dev)
 	int len = length;
 	if (!single_segment) len = len + 1;
 
-	if (spi_fd != -1) sl_client_spi_transfer(spi_fd, &send[0], &recv[0], len);
+	sl_client_spi_transfer(spi_fd, &send[0], &recv[0], len);
 
 	// if (is_read && length == 7) {
-	// 	printf("0x%0.2x 0x%0.2x 0x%0.2x 0x%0.2x 0x%0.2x 0x%0.2x 0x%0.2x 0x%0.2x 0x%0.2x",
-	// 		   (send[0] & 0x7f), recv[0], recv[1], recv[2], recv[3], recv[4], recv[5], recv[6], recv[7]);
+	// 	printf("Read length %d, 0x%0.2x 0x%0.2x 0x%0.2x 0x%0.2x 0x%0.2x 0x%0.2x 0x%0.2x 0x%0.2x 0x%0.2x",
+	// 		   length, (send[0] & 0x7f), recv[0], recv[1], recv[2], recv[3], recv[4], recv[5], recv[6], recv[7]);
 	// }
 
 	if (is_read) {
