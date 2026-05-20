@@ -159,8 +159,8 @@ CCACHE :=
 endif
 
 # Tool names (defer prefix resolution for per-platform overrides like SITL)
-CROSS_CC     = $(CCACHE) $(ARM_SDK_PREFIX)gcc
-CROSS_CXX    = $(CCACHE) $(ARM_SDK_PREFIX)g++
+CROSS_CC     ?= $(CCACHE) $(ARM_SDK_PREFIX)gcc
+CROSS_CXX    ?= $(CCACHE) $(ARM_SDK_PREFIX)g++
 CROSS_GDB    = $(ARM_SDK_PREFIX)gdb
 OBJCOPY      = $(ARM_SDK_PREFIX)objcopy
 OBJDUMP      = $(ARM_SDK_PREFIX)objdump
@@ -204,7 +204,7 @@ REVISION := $(shell git rev-parse --short=9 HEAD)
 endif
 endif
 
-LD_FLAGS        :=
+LD_FLAGS        ?=
 EXTRA_LD_FLAGS  :=
 
 #
@@ -238,7 +238,7 @@ else
 ifeq ($(DEBUG),INFO)
 DEBUG_FLAGS            = -ggdb2
 endif
-OPTIMISATION_BASE     := -flto=auto -fuse-linker-plugin -ffast-math -fmerge-all-constants
+OPTIMISATION_BASE     ?= -flto=auto -fuse-linker-plugin -ffast-math -fmerge-all-constants
 OPTIMISE_DEFAULT      := -O2
 OPTIMISE_SPEED        := -Ofast
 OPTIMISE_SIZE         := -Os
@@ -372,13 +372,18 @@ TEMPORARY_FLAGS :=
 
 EXTRA_WARNING_FLAGS := -Wold-style-definition
 
+ifeq ($(patsubst %gcc,,$(lastword $(CROSS_CC))),)
+GCC_WARNING_FLAGS := -Wunsafe-loop-optimizations
+endif
+
 CFLAGS     += $(ARCH_FLAGS) \
               $(addprefix -D,$(OPTIONS)) \
               $(addprefix -I,$(INCLUDE_DIRS)) \
               $(addprefix -isystem,$(SYS_INCLUDE_DIRS)) \
               $(DEBUG_FLAGS) \
               -std=gnu17 \
-              -Wall -Wextra -Werror -Wunsafe-loop-optimizations $(WARN_DOUBLE_PROMOTION) \
+              -Wall -Wextra -Werror $(WARN_DOUBLE_PROMOTION) \
+              $(GCC_WARNING_FLAGS) \
               $(EXTRA_WARNING_FLAGS) \
               -ffunction-sections \
               -fdata-sections \
@@ -511,7 +516,11 @@ endif
 
 $(TARGET_HEX): $(TARGET_ELF)
 	@echo "Creating HEX $(TARGET_HEX)" "$(STDOUT)"
+ifneq ($(TARGET_MCU_FAMILY),HEXAGON)
 	$(V1) $(OBJCOPY) -O ihex --set-start 0x8000000 $< $@
+else
+	touch $(TARGET_HEX)
+endif
 
 $(TARGET_DFU): $(TARGET_HEX)
 	@echo "Creating DFU $(TARGET_DFU)" "$(STDOUT)"
@@ -564,8 +573,12 @@ endif
 
 $(TARGET_ELF): $(TARGET_OBJS) $(LD_SCRIPT) $(LD_SCRIPTS)
 	@echo "Linking $(TARGET_NAME)" "$(STDOUT)"
+ifeq ($(TARGET_MCU_FAMILY),HEXAGON)
+	$(V1) hexagon-link $(LD_FLAGS) -o $(TARGET_ELF) $(TARGET_OBJS)
+else
 	$(V1) $(CROSS_CC) -o $@ $(filter-out %.ld,$^) $(LD_FLAGS)
 	$(V1) $(SIZE) $(TARGET_ELF)
+endif
 
 $(TARGET_UF2): $(TARGET_ELF)
 	@echo "Creating UF2 $(TARGET_UF2)" "$(STDOUT)"
