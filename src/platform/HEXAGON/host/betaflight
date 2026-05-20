@@ -1,0 +1,290 @@
+#!/usr/bin/python3
+
+import os
+import stat
+import sys
+import time
+import asyncio
+from ctypes import *
+import socket
+import threading
+from websockets.server import serve
+
+# Tag bytes for multiplexing virtual ports over the single SLPI link channel.
+# Must match HOST_TAG_* in src/platform/HEXAGON/serial_uart_hexagon.c.
+TAG_MSP     = 0x5A
+TAG_OSD     = 0xA5
+TAG_REBOOT  = 0x42
+TAG_MAVLINK = 0x4D
+
+# UDP port that QGroundControl auto-discovers vehicles on.
+MAVLINK_UDP_PORT = 14550
+
+rebooting = False
+
+# Last seen MAVLink ground station address (learned from the first inbound UDP
+# packet). MAVLink telemetry coming up from the DSP is sent to this address.
+mavlink_peer = None
+mavlink_peer_lock = threading.Lock()
+
+# Per-second traffic counters. A daemon thread prints a summary block each
+# second when any counter is non-zero.
+stats_lock = threading.Lock()
+stats = {
+    # "up" = from the DSP (flight controller); "dn" = to the DSP.
+    "mav_up_pkts":     0, "mav_up_bytes":     0,  # DSP -> UDP (to GCS)
+    "mav_dn_pkts":     0, "mav_dn_bytes":     0,  # UDP -> DSP (from GCS)
+    "mav_up_dropped":  0,                          # frames from DSP dropped (no GCS peer yet)
+    "msp_up_pkts":     0, "msp_up_bytes":     0,  # DSP -> WS (to Configurator)
+    "msp_dn_pkts":     0, "msp_dn_bytes":     0,  # WS -> DSP (from Configurator)
+    "osd_pkts":        0, "osd_bytes":        0,  # DSP -> OSD pipe (single direction)
+}
+
+def stats_printer():
+    while True:
+        time.sleep(1.0)
+        with stats_lock:
+            snap = dict(stats)
+            for k in stats:
+                stats[k] = 0
+        if any(snap.values()):
+            print(
+                f"[1s] MAVLink up={snap['mav_up_pkts']}p/{snap['mav_up_bytes']}B "
+                f"dn={snap['mav_dn_pkts']}p/{snap['mav_dn_bytes']}B "
+                f"dropped={snap['mav_up_dropped']}\n"
+                f"     MSP     up={snap['msp_up_pkts']}p/{snap['msp_up_bytes']}B "
+                f"dn={snap['msp_dn_pkts']}p/{snap['msp_dn_bytes']}B\n"
+                f"     OSD     up={snap['osd_pkts']}p/{snap['osd_bytes']}B"
+            )
+
+async def handle_websocket(websocket, path):
+    """Per-connection handler for MSP traffic from the Betaflight Configurator."""
+    global server_connection
+    global rebooting
+
+    # Configurator expects one MSP session at a time; drop any prior connection.
+    if server_connection is not None and server_connection is not websocket:
+        try:
+            await server_connection.close()
+        except Exception:
+            pass
+
+    print(f"Accepted WebSocket connection from {websocket.remote_address}")
+    server_connection = websocket
+    try:
+        async for message in websocket:
+            if not isinstance(message, (bytes, bytearray)):
+                print(f"Ignoring non-binary WS message: {message!r}")
+                continue
+            if rebooting:
+                continue
+            # Prepend MSP tag so the DSP routes to the MSP ring buffer.
+            tagged = bytes([TAG_MSP]) + bytes(message)
+            betaflight.slpi_link_send(tagged, c_ulong(len(tagged)))
+            with stats_lock:
+                stats["msp_dn_pkts"] += 1
+                stats["msp_dn_bytes"] += len(message)
+    except Exception as e:
+        print(f"WebSocket recv error: {e}")
+    finally:
+        if server_connection is websocket:
+            server_connection = None
+        print("WebSocket connection closed")
+
+def _log_ws_send_error(fut):
+    try:
+        exc = fut.exception()
+    except Exception:
+        return
+    if exc is not None:
+        print(f"WebSocket send failed: {exc}")
+
+def receive_mavlink_udp():
+    """Forward UDP datagrams from QGC down to the DSP, tagged for MAVLink."""
+    global mavlink_peer
+    global rebooting
+    while True:
+        try:
+            data, addr = mavlink_socket.recvfrom(2048)
+        except Exception as e:
+            print(f"MAVLink UDP recv error: {e}")
+            time.sleep(0.1)
+            continue
+
+        if data:
+            with mavlink_peer_lock:
+                if mavlink_peer != addr:
+                    print(f"MAVLink GCS at {addr}")
+                    mavlink_peer = addr
+            if not rebooting:
+                tagged = bytes([TAG_MAVLINK]) + data
+                betaflight.slpi_link_send(tagged, c_ulong(len(tagged)))
+                with stats_lock:
+                    stats["mav_dn_pkts"] += 1
+                    stats["mav_dn_bytes"] += len(data)
+
+def bytearray_to_const_void_ptr(data: bytearray) -> c_void_p:
+    """Converts a bytearray to a ctypes const void pointer."""
+    arr = (c_ubyte * len(data)).from_buffer(data)
+    ptr = cast(addressof(arr), c_void_p)
+
+    return ptr
+
+def py_cb_func(data, len):
+    global server_connection
+    global rebooting
+    global pympa
+    global betaflight
+    global cb_func
+    global mavlink_peer
+
+    # print('Got data callback')
+
+    data_array = cast(data, POINTER(c_ubyte))
+    if data_array[0] == TAG_MSP:
+        payload_len = len - 1
+        binary_data = bytearray(payload_len)
+        for i in range(1, len):
+            binary_data[i-1] = data_array[i]
+
+        if server_connection is not None and ws_loop is not None:
+            try:
+                fut = asyncio.run_coroutine_threadsafe(
+                    server_connection.send(bytes(binary_data)),
+                    ws_loop,
+                )
+                fut.add_done_callback(_log_ws_send_error)
+                with stats_lock:
+                    stats["msp_up_pkts"] += 1
+                    stats["msp_up_bytes"] += payload_len
+            except Exception as e:
+                print(f"WebSocket send failed: {e}")
+    elif data_array[0] == TAG_OSD:
+        payload_len = len - 1
+        binary_data = bytearray(payload_len)
+        for i in range(1, len):
+            binary_data[i-1] = data_array[i]
+        pympa.pipe_server_write(0, bytearray_to_const_void_ptr(binary_data), payload_len);
+        with stats_lock:
+            stats["osd_pkts"] += 1
+            stats["osd_bytes"] += payload_len
+    elif data_array[0] == TAG_MAVLINK:
+        payload_len = len - 1
+        binary_data = bytearray(payload_len)
+        for i in range(1, len):
+            binary_data[i-1] = data_array[i]
+        with mavlink_peer_lock:
+            peer = mavlink_peer
+        if peer is not None:
+            try:
+                mavlink_socket.sendto(binary_data, peer)
+                with stats_lock:
+                    stats["mav_up_pkts"] += 1
+                    stats["mav_up_bytes"] += payload_len
+            except Exception as e:
+                print(f"MAVLink UDP sendto failed: {e}")
+        else:
+            with stats_lock:
+                stats["mav_up_dropped"] += 1
+    elif data_array[0] == TAG_REBOOT:
+        if not rebooting:
+            print('Got reboot command')
+            rebooting = True
+            # Reset SLPI
+            betaflight.slpi_link_reset(None)
+            # Wait for SLPI to reboot
+            time.sleep(10)
+            print('Calling slpi_link_init to re-initialize')
+            result = betaflight.slpi_link_init(False, cb_func, b'betaflight.so')
+            print('slpi_link_init returned: ' + str(result))
+            rebooting = False
+        # else:
+        #     print("Got duplicate reboot command while rebooting")
+    else:
+        print("Got unknown data packet" + str(data_array[0]))
+
+#### MAIN ####
+
+server_connection = None
+# asyncio event loop running the WebSocket server. The SLPI C callback runs on
+# a non-asyncio thread, so uplink sends are scheduled via
+# asyncio.run_coroutine_threadsafe(..., ws_loop).
+ws_loop = None
+
+# Set up OSD MPA server pipe
+pympa = CDLL("libmodal_pipe.so")
+
+class PIPE_INFO(Structure):
+    _fields_ = [("name", c_char * 32),
+                ("location", c_char * 64),
+                ("type", c_char * 32),
+                ("server_name", c_char * 32),
+                ("size_bytes", c_int),
+                ("server_pid", c_int)]
+
+info = PIPE_INFO()
+info.name = b'msp_osd'
+info.type = b'msp_dp_cmd_t'
+info.server_name = b'betaflight'
+info.size_bytes = 4096
+info.server_pid = 0
+
+success = pympa.pipe_server_create(0, info, 0);
+if success == -1:
+    print('ERROR: Could not create OSD MPA server pipe')
+    sys.exit(-1)
+
+betaflight = CDLL('libslpi_link.so.1')
+
+# typedef void (*slpi_link_cb)(const uint8_t *data, uint32_t length_in_bytes);
+CBFUNC = CFUNCTYPE(None, POINTER(c_ubyte), c_ulong)
+cb_func = CBFUNC(py_cb_func)
+
+print('Calling slpi_link_init')
+
+# int slpi_link_init(bool enable_debug_messages, slpi_link_cb callback, const char *library_name);
+result = betaflight.slpi_link_init(False, cb_func, b'betaflight.so')
+
+print('slpi_link_init returned: ' + str(result))
+
+# UDP socket for MAVLink ground stations (QGroundControl, MAVProxy, etc.).
+mavlink_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+mavlink_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+mavlink_socket.bind(('', MAVLINK_UDP_PORT))
+print(f"MAVLink UDP listening on 0.0.0.0:{MAVLINK_UDP_PORT}")
+
+mavlink_thread = threading.Thread(target=receive_mavlink_udp, daemon=True)
+mavlink_thread.start()
+
+stats_thread = threading.Thread(target=stats_printer, daemon=True)
+stats_thread.start()
+
+# WebSocket server for the Betaflight Configurator (binary MSP frames).
+# Configurator only initiates WebSocket connects to loopback hosts, so use
+# `adb forward tcp:8765 tcp:8765` on the laptop and point Configurator at
+# ws://localhost:8765 (see the voxl-configurator helper script).
+async def ws_main():
+    global ws_loop
+    ws_loop = asyncio.get_running_loop()
+    async with serve(
+        handle_websocket,
+        "",
+        8765,
+        subprotocols=["binary", "wsSerial"],
+    ):
+        print("WebSocket server started at ws://0.0.0.0:8765")
+        await asyncio.Future()  # run forever
+
+try:
+    asyncio.run(ws_main())
+except KeyboardInterrupt:
+    pass
+
+print('Exiting...')
+
+# Close OSD MSP pipe
+# pympa_close_pub(mpa_channel)
+pympa.pipe_server_close(0)
+
+# Reset SLPI
+betaflight.slpi_link_reset(None)
