@@ -1,0 +1,264 @@
+
+Gyro / IMU / SPI notes
+======================
+
+1. Questions
+***************************
+
+- gyro.gyroSensor1.gyroDev.dev.bus is a busDevice_t*. How does that get initialized?
+	Answer: It is assigned the address of static variable bus in mputDetect
+- Within that busDevice_t, how does busType_u.spi.instance get initialized? It is a SPI_TypeDef* (See target.h)
+	Answer: It's set by a call to spiInstanceByDevice(0) which sets it to spiDevice[device].dev. spiDevice is an array in main/drivers/bus_spi.c
+- How does spiDevice[device].dev get initialized?
+	Answer: I had to set it in bus_spi_hexagon.c!!!
+
+2. Call tree for initialization
+***************************
+
+init() in main/fc/init.c
+calls sensorsAutodetect() in main/sensors/initialisation.c
+calls gyroInit() in main/sensors/gyro_init.c
+calls gyroDetectSensor() in main/sensors/gyro_init.c
+	first arg &gyro.gyroSensor1 type gyroSensor_t*
+	second arg gyroDeviceConfig(0) type gyroDeviceConfig_t* (From eeprom file)
+calls mpuDetect() in main/drivers/accgyro/accgyro_mpu.c
+	first arg &gyroSensor->gyroDev type gyroDev_t*
+	second arg config type gyroDeviceConfig_t* (From eeprom file)
+calls detectSPISensorsAndUpdateDetectionResult() in main/drivers/accgyro/accgyro_mpu.c
+	first arg &gyroSensor->gyroDev type gyroDev_t*
+	second arg config type gyroDeviceConfig_t* (From eeprom file)
+calls spiSetBusInstance() in main/drivers/bus_spi.c
+	first arg &gyro->dev type extDevice_t*
+	second arg config->spiBus type uint32_t
+
+
+3. Types and variables used
+***************************
+
+typedef struct gyro_s {
+    uint16_t sampleRateHz;
+    uint32_t targetLooptime;
+    uint32_t sampleLooptime;
+    float scale;
+    float gyroADC[XYZ_AXIS_COUNT];     // aligned, calibrated, scaled, but unfiltered data from the sensor(s)
+    float gyroADCf[XYZ_AXIS_COUNT];    // filtered gyro data
+    uint8_t sampleCount;               // gyro sensor sample counter
+    float sampleSum[XYZ_AXIS_COUNT];   // summed samples used for downsampling
+    bool downsampleFilterEnabled;      // if true then downsample using gyro lowpass 2, otherwise use averaging
+
+    gyroSensor_t gyroSensor1;
+#ifdef USE_MULTI_GYRO
+    gyroSensor_t gyroSensor2;
+#endif
+
+    gyroDev_t *rawSensorDev;           // pointer to the sensor providing the raw data for DEBUG_GYRO_RAW
+
+    // lowpass gyro soft filter
+    filterApplyFnPtr lowpassFilterApplyFn;
+    gyroLowpassFilter_t lowpassFilter[XYZ_AXIS_COUNT];
+
+    // lowpass2 gyro soft filter
+    filterApplyFnPtr lowpass2FilterApplyFn;
+    gyroLowpassFilter_t lowpass2Filter[XYZ_AXIS_COUNT];
+
+    // notch filters
+    filterApplyFnPtr notchFilter1ApplyFn;
+    biquadFilter_t notchFilter1[XYZ_AXIS_COUNT];
+
+    filterApplyFnPtr notchFilter2ApplyFn;
+    biquadFilter_t notchFilter2[XYZ_AXIS_COUNT];
+
+    uint16_t accSampleRateHz;
+    uint8_t gyroToUse;
+    uint8_t gyroDebugMode;
+    bool gyroHasOverflowProtection;
+    bool useDualGyroDebugging;
+    flight_dynamics_index_t gyroDebugAxis;
+
+#ifdef USE_DYN_LPF
+    uint8_t dynLpfFilter;
+    uint16_t dynLpfMin;
+    uint16_t dynLpfMax;
+    uint8_t dynLpfCurveExpo;
+#endif
+
+#ifdef USE_GYRO_OVERFLOW_CHECK
+    uint8_t overflowAxisMask;
+#endif
+    pt1Filter_t imuGyroFilter[XYZ_AXIS_COUNT];
+} gyro_t;
+
+Defined in main/sensors/gyro.h
+
+gyro_t gyro is declared in main/sensors/gyro.c
+
+***************************
+
+typedef struct gyroSensor_s {
+    gyroDev_t gyroDev;
+    gyroCalibration_t calibration;
+} gyroSensor_t;
+
+Defined in src/main/sensors/gyro.h
+
+***************************
+
+typedef struct gyroDeviceConfig_s {
+    int8_t index;
+    uint8_t busType;
+    uint8_t spiBus;
+    ioTag_t csnTag;
+    uint8_t i2cBus;
+    uint8_t i2cAddress;
+    ioTag_t extiTag;
+    uint8_t alignment;        // sensor_align_e
+    sensorAlignment_t customAlignment;
+    ioTag_t clkIn;
+} gyroDeviceConfig_t;
+
+Defined in main/pg/gyrodev.h
+
+***************************
+
+typedef struct gyroDev_s {
+#if defined(SIMULATOR_BUILD) && defined(SIMULATOR_MULTITHREAD)
+    pthread_mutex_t lock;
+#endif
+    sensorGyroInitFuncPtr initFn;                             // initialize function
+    sensorGyroReadFuncPtr readFn;                             // read 3 axis data function
+    sensorGyroReadDataFuncPtr temperatureFn;                  // read temperature if available
+    extiCallbackRec_t exti;
+    extDevice_t dev;
+    float scale;                                             // scalefactor
+    float gyroZero[XYZ_AXIS_COUNT];
+    vector3_t gyroADC;                                       // gyro data after calibration and alignment
+    int32_t gyroADCRawPrevious[XYZ_AXIS_COUNT];
+    int16_t gyroADCRaw[XYZ_AXIS_COUNT];                      // raw data from sensor
+    int16_t temperature;
+    mpuDetectionResult_t mpuDetectionResult;
+    sensor_align_e gyroAlign;
+    gyroRateKHz_e gyroRateKHz;
+    gyroModeSPI_e gyroModeSPI;
+    uint32_t detectedEXTI;
+    uint32_t gyroLastEXTI;
+    uint32_t gyroSyncEXTI;
+    int32_t gyroShortPeriod;
+    int32_t gyroDmaMaxDuration;
+    busSegment_t segments[2];
+    volatile bool dataReady;
+    bool gyro_high_fsr;
+    uint8_t hardware_lpf;
+    uint8_t hardware_32khz_lpf;
+    uint8_t mpuDividerDrops;
+    ioTag_t mpuIntExtiTag;
+    uint8_t gyroHasOverflowProtection;
+    gyroHardware_e gyroHardware;
+    matrix33_t rotationMatrix;
+    uint16_t gyroSampleRateHz;
+    uint16_t accSampleRateHz;
+    uint8_t accDataReg;
+    uint8_t gyroDataReg;
+} gyroDev_t;
+
+Defined in src/main/drivers/accgyro/accgyro.h
+
+***************************
+
+typedef struct extDevice_s {
+    busDevice_t *bus;
+    union {
+        struct extSpi_s {
+            uint16_t speed;
+            IO_t csnPin;
+            bool leadingEdge;
+        } spi;
+        struct extI2C_s {
+            uint8_t address;
+        } i2c;
+        struct extMpuSlave_s {
+            uint8_t address;
+        } mpuSlave;
+    } busType_u;
+#ifdef USE_DMA
+    // Cache the init structure for the next DMA transfer to reduce inter-segment delay
+#if defined(USE_FULL_LL_DRIVER)
+    LL_DMA_InitTypeDef          dmaInitTx;
+    LL_DMA_InitTypeDef          dmaInitRx;
+#else
+    DMA_InitTypeDef             dmaInitTx;
+    DMA_InitTypeDef             dmaInitRx;
+#endif
+#endif // USE_DMA
+    // Support disabling DMA on a per device basis
+    bool useDMA;
+    // Per device buffer reference if needed
+    uint8_t *txBuf, *rxBuf;
+    // Connected devices on the same bus may support different speeds
+    uint32_t callbackArg;
+} extDevice_t;
+
+Defined in main/drivers/bus.h
+
+***************************
+
+typedef struct busDevice_s {
+    busType_e busType;
+    union {
+        struct busSpi_s {
+            SPI_TypeDef *instance;
+            uint16_t speed;
+            bool leadingEdge;
+        } spi;
+        struct busI2C_s {
+            I2CDevice device;
+        } i2c;
+        struct busMpuSlave_s {
+            struct extDevice_s *master;
+        } mpuSlave;
+    } busType_u;
+    bool useDMA;
+    uint8_t deviceCount;
+#ifdef USE_DMA
+    dmaChannelDescriptor_t *dmaTx;
+    dmaChannelDescriptor_t *dmaRx;
+    // Use a reference here as this saves RAM for unused descriptors
+#if defined(USE_FULL_LL_DRIVER)
+    LL_DMA_InitTypeDef          *dmaInitTx;
+    LL_DMA_InitTypeDef          *dmaInitRx;
+#else
+    DMA_InitTypeDef             *dmaInitTx;
+    DMA_InitTypeDef             *dmaInitRx;
+#endif
+#endif // USE_DMA
+    volatile struct busSegment_s* volatile curSegment;
+    bool initSegment;
+} busDevice_t;
+
+Defined in main/drivers/bus.h
+
+***************************
+
+typedef struct SPIDevice_s {
+    SPI_TypeDef *dev;
+    ioTag_t sck;
+    ioTag_t miso;
+    ioTag_t mosi;
+#if defined(STM32F7) || defined(STM32H7) || defined(STM32G4) || defined(AT32F4) || defined(APM32F4)
+    uint8_t sckAF;
+    uint8_t misoAF;
+    uint8_t mosiAF;
+#else
+    uint8_t af;
+#endif
+#if defined(HAL_SPI_MODULE_ENABLED)
+    SPI_HandleTypeDef hspi;
+#endif
+    rccPeriphTag_t rcc;
+    volatile uint16_t errorCount;
+    bool leadingEdge;
+#ifdef USE_DMA
+    uint8_t dmaIrqHandler;
+#endif
+} spiDevice_t;
+
+Defined in main/drivers/bus_spi_impl.h
