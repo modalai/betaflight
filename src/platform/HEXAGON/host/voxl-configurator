@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+#
+# Launch the Betaflight Configurator PWA in a dedicated Chrome app window,
+# pointed at the on-device WebSocket MSP server via an adb port forward.
+#
+# The Configurator only initiates WebSocket connects to loopback hosts, so we
+# forward laptop localhost:8765 -> device 8765 and point Configurator at
+# ws://localhost:8765 from inside its UI.
+
+set -euo pipefail
+
+PORT=8765
+URL="https://app.betaflight.com/#"
+PROFILE_DIR="/tmp/voxl-configurator-profile"
+
+CHROME="$(command -v google-chrome || command -v google-chrome-stable || true)"
+if [[ -z "$CHROME" ]]; then
+    echo "ERROR: google-chrome not found in PATH" >&2
+    exit 1
+fi
+
+if ! command -v adb >/dev/null 2>&1; then
+    echo "ERROR: adb not found in PATH" >&2
+    exit 1
+fi
+
+# Ensure a device is connected before trying to set up the forward.
+if ! adb get-state >/dev/null 2>&1; then
+    echo "ERROR: no adb device detected (adb get-state failed)" >&2
+    exit 1
+fi
+
+# Idempotent: re-running 'adb forward' on the same local port just replaces
+# the existing rule.
+adb forward "tcp:${PORT}" "tcp:${PORT}" >/dev/null
+echo "adb forward tcp:${PORT} -> device tcp:${PORT}"
+
+exec "$CHROME" \
+    --app="$URL" \
+    --user-data-dir="$PROFILE_DIR" \
+    --no-first-run \
+    --no-default-browser-check
