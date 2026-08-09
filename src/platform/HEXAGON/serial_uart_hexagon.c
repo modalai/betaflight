@@ -146,6 +146,8 @@ static int log_buffer_index;
 static int log_write_buffer;
 static bool logging_initialized;
 static bool log_data_received;
+static volatile bool log_flush_requested;
+static volatile bool log_flush_complete;
 static const char dir_path[] = "/data/betaflight";
 static const char logfile[] = "log.bin";
 static char full_log_path[128];
@@ -377,7 +379,13 @@ uint8_t hexagonSerialRead(serialPort_t *instance) {
 }
 
 bool hexagonIsSerialTransmitBufferEmpty(const serialPort_t *instance) {
-	(void) instance;
+	if (getUARTfunction(instance->identifier) == UART_FUNCTION_BLACKBOX && log_data_received) {
+		if (log_flush_complete) {
+			return true;
+		}
+		log_flush_requested = true;
+		return false;
+	}
 	return true;
 }
 
@@ -473,8 +481,6 @@ void *tx_thread(void *arg)
 			logging_initialized = true;
 		}
 
-		// TODO: Also consider the case where the buffer is only partially written
-		//       when the drone is disarmed. Could attempt to recover that as well
 		if ((full_log_path[0] != 0) && (log_buffer != log_write_buffer)) {
 			while (log_buffer != log_write_buffer) {
 				// printf("Writing buffer %d", log_write_buffer);
@@ -489,6 +495,25 @@ void *tx_thread(void *arg)
 				log_write_buffer++;
 				if (log_write_buffer == MAX_LOG_BUFFERS) log_write_buffer = 0;
 			}
+		}
+
+		// Blackbox calls isSerialTransmitBufferEmpty() when forcing the header or
+		// shutdown data to storage. Once all completed buffers are on disk, flush
+		// the current partial buffer and acknowledge completion.
+		if (log_flush_requested) {
+			if ((full_log_path[0] != 0) && (log_buffer_index > 0)) {
+				FILE *fp = fopen(full_log_path, "ab");
+				if (fp == NULL) {
+					printf("Error opening the log file for final flush");
+					full_log_path[0] = 0;
+				} else {
+					fwrite(log_buffers[log_buffer], 1, log_buffer_index, fp);
+					fclose(fp);
+				}
+				log_buffer_index = 0;
+			}
+			log_flush_requested = false;
+			log_flush_complete = true;
 		}
 
 		// Send virtual port updates no faster than every 1ms
@@ -567,6 +592,7 @@ void hexagonSerialWrite(serialPort_t *instance, uint8_t ch) {
 
 	if (uartFunction == UART_FUNCTION_BLACKBOX) {
 		log_data_received = true;
+		log_flush_complete = false;
 		if (log_buffer_index == MAX_LOG_BUFFER_SIZE) {
 			log_buffer_index = 0;
 			log_buffer++;
@@ -723,6 +749,9 @@ void uartReconfigure(uartPort_t *uartPort)
 		osdTxBuffer[0] = HOST_TAG_OSD;
 		osdTxBufferIndex = 1;
 		startTxThreadOnce();
+	} else if (uartFunction == UART_FUNCTION_BLACKBOX) {
+		printf("Reconfiguring Blackbox virtual port");
+		startTxThreadOnce();
 	}
 }
 
@@ -731,4 +760,3 @@ void uartIrqHandler(uartPort_t *s)
 	int fd = s->USARTx->fd;
 	printf("====== In uartIrqHandler, fd %d", fd);
 }
-
