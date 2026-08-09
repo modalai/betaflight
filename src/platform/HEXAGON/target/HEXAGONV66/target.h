@@ -172,6 +172,7 @@ const char *targetGetConfigFile(void);
 #define USE_HOTT_TEXTMODE
 #undef USE_TELEMETRY_SMARTPORT
 #define USE_TELEMETRY_MAVLINK
+#define USE_EXTERNAL_CONTROL
 #undef USE_RESOURCE_MGMT
 #define USE_CMS
 #undef USE_TELEMETRY_CRSF

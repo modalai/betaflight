@@ -335,6 +335,13 @@ void pgResetFn_serialConfig(serialConfig_t *serialConfig)
     }
 #endif
 
+#ifdef MAVLINK_UART
+    serialPortConfig_t *mavlinkUartConfig = serialFindPortConfigurationMutable(MAVLINK_UART);
+    if (mavlinkUartConfig) {
+        mavlinkUartConfig->functionMask = FUNCTION_TELEMETRY_MAVLINK;
+    }
+#endif
+
 #ifdef USE_VTX
 #ifdef VTX_SMARTAUDIO_UART
     serialPortConfig_t *vtxSmartAudioUartConfig = serialFindPortConfigurationMutable(VTX_SMARTAUDIO_UART);

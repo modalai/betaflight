@@ -52,6 +52,9 @@
 #include "fc/runtime_config.h"
 
 #include "flight/flight_plan_nav.h"
+#ifdef USE_EXTERNAL_CONTROL
+#include "flight/external_control.h"
+#endif
 #include "flight/mixer.h"
 #include "flight/pid.h"
 #include "flight/imu.h"
@@ -535,6 +538,49 @@ static void handleCommandLong(const mavlink_message_t *msg)
     }
 }
 
+#ifdef USE_EXTERNAL_CONTROL
+static void handleSetAttitudeTarget(const mavlink_message_t *msg)
+{
+    mavlink_set_attitude_target_t target;
+    mavlink_msg_set_attitude_target_decode(msg, &target);
+
+    if ((target.target_system != 0 && target.target_system != MAVLINK_SYSTEM_ID) ||
+        (target.target_component != 0 && target.target_component != MAVLINK_COMPONENT_ID)) {
+        externalControlRecordRejection(EXTERNAL_CONTROL_REJECT_TARGET);
+        return;
+    }
+
+    // Phase one accepts the VFC contract only: attitude and scalar thrust are
+    // required, roll/pitch body rates are ignored, and yaw rate is optional.
+    const uint8_t requiredMask = ATTITUDE_TARGET_TYPEMASK_BODY_ROLL_RATE_IGNORE |
+        ATTITUDE_TARGET_TYPEMASK_BODY_PITCH_RATE_IGNORE;
+    const uint8_t allowedMask = requiredMask | ATTITUDE_TARGET_TYPEMASK_BODY_YAW_RATE_IGNORE;
+    const uint8_t unsupportedMask = target.type_mask & (uint8_t)~allowedMask;
+    if ((target.type_mask & requiredMask) != requiredMask || unsupportedMask != 0) {
+        externalControlRecordRejection(EXTERNAL_CONTROL_REJECT_TYPE_MASK);
+        return;
+    }
+
+    // MAVLink/PX4 uses body-FRD and earth-NED. Betaflight uses body-FLU and
+    // earth-NWU. Conjugating by the 180-degree X-axis frame rotation maps the
+    // quaternion as [w, x, y, z] -> [w, x, -y, -z]. Body angular velocity is
+    // mapped by that same axis rotation, so MAVLink's yaw rate is negated.
+    const externalControlSetpointInput_t input = {
+        .attitude = {
+            .w = target.q[0],
+            .x = target.q[1],
+            .y = -target.q[2],
+            .z = -target.q[3],
+        },
+        .thrust = target.thrust,
+        .yawRate = -target.body_yaw_rate,
+        .sourceTimestampMs = target.time_boot_ms,
+        .hasYawRate = !(target.type_mask & ATTITUDE_TARGET_TYPEMASK_BODY_YAW_RATE_IGNORE),
+    };
+    externalControlPublishSetpoint(&input, micros());
+}
+#endif
+
 static void mavlinkDispatch(const mavlink_message_t *msg)
 {
     switch (msg->msgid) {
@@ -550,6 +596,11 @@ static void mavlinkDispatch(const mavlink_message_t *msg)
     case MAVLINK_MSG_ID_COMMAND_LONG:
         handleCommandLong(msg);
         break;
+#ifdef USE_EXTERNAL_CONTROL
+    case MAVLINK_MSG_ID_SET_ATTITUDE_TARGET:
+        handleSetAttitudeTarget(msg);
+        break;
+#endif
     default:
 #if ENABLE_TELEMETRY_MAVLINK_MISSION
         mavMissionHandleMessage(msg);
@@ -907,6 +958,29 @@ static void mavlinkSendAttitude(void)
     transmitCounter = (transmitCounter + 1) % 100;
 }
 
+#ifdef USE_EXTERNAL_CONTROL
+static void mavlinkSendAttitudeTarget(void)
+{
+    quaternion_t attitudeQuaternion;
+    getQuaternion(&attitudeQuaternion);
+
+    // Inverse of the receive-side NED/FRD to NWU/FLU conversion. This passive
+    // reference deliberately reports measured attitude with zero thrust; it
+    // does not expose an active flight-control setpoint or command the mixer.
+    const float q[4] = {
+        attitudeQuaternion.w,
+        attitudeQuaternion.x,
+        -attitudeQuaternion.y,
+        -attitudeQuaternion.z,
+    };
+    const uint8_t typeMask = ATTITUDE_TARGET_TYPEMASK_BODY_ROLL_RATE_IGNORE |
+        ATTITUDE_TARGET_TYPEMASK_BODY_PITCH_RATE_IGNORE;
+    mavlink_msg_attitude_target_pack(MAVLINK_SYSTEM_ID, MAVLINK_COMPONENT_ID, &mavMsg,
+        millis(), typeMask, q, 0.0f, 0.0f, 0.0f, 0.0f);
+    mavlinkSendMessage(&mavMsg);
+}
+#endif
+
 static void mavlinkSendHeartbeat(void)
 {
     uint16_t msgLength;
@@ -1154,6 +1228,15 @@ static mavlinkTelemetryOutputMessage_t mavTelemetryOutputMessages[] = {
         .updateTime = 0,
         .sendMessageFunc = mavlinkSendAttitude,
     },
+#ifdef USE_EXTERNAL_CONTROL
+    {
+        .id = MAVLINK_MSG_ID_ATTITUDE_TARGET,
+        .stream = MAV_DATA_STREAM_EXTRA1,
+        .updateInterval = UINT32_MAX,
+        .updateTime = 0,
+        .sendMessageFunc = mavlinkSendAttitudeTarget,
+    },
+#endif
     {
         .id = MAVLINK_MSG_ID_HEARTBEAT,
         .stream = MAV_DATA_STREAM_EXTRA2,
@@ -1308,6 +1391,10 @@ void checkMAVLinkTelemetryState(void)
 
 void handleMAVLinkTelemetry(void)
 {
+#ifdef USE_EXTERNAL_CONTROL
+    const timeUs_t currentTimeUs = micros();
+    externalControlUpdateDebug(currentTimeUs);
+#endif
     if (!mavlinkTelemetryEnabled || !mavlinkPort) {
         return;
     }
@@ -1326,7 +1413,11 @@ void handleMAVLinkTelemetry(void)
 #endif
 
     bool shouldSendTelemetry = false;
-    uint32_t now = micros();
+#ifdef USE_EXTERNAL_CONTROL
+    const uint32_t now = (uint32_t)currentTimeUs;
+#else
+    const uint32_t now = micros();
+#endif
     if (isValidMavlinkTxBuffer()) {
         shouldSendTelemetry = shouldSendMavlinkTelemetry();
     } else if ((now - lastMavlinkMessageTime) >= TELEMETRY_MAVLINK_DELAY) {

@@ -46,6 +46,9 @@
 #include "fc/runtime_config.h"
 
 #include "flight/autopilot.h"
+#ifdef USE_EXTERNAL_CONTROL
+#include "flight/external_control.h"
+#endif
 #include "flight/gps_rescue.h"
 #include "flight/imu.h"
 #include "flight/mixer.h"
@@ -1049,6 +1052,12 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
 {
     static float previousGyroRateDterm[XYZ_AXIS_COUNT];
     static float previousRawGyroRateDterm[XYZ_AXIS_COUNT];
+
+#ifdef USE_EXTERNAL_CONTROL
+    // Passive phase only: calculate and log the command that a future gated
+    // integration would consume. Do not alter RC or PID setpoints here.
+    externalControlUpdateShadowCommand(currentTimeUs);
+#endif
 
     calculateSpaValues(pidProfile);
 

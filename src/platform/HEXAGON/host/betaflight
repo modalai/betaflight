@@ -20,7 +20,14 @@ TAG_MAVLINK = 0x4D
 # UDP port that QGroundControl auto-discovers vehicles on.
 MAVLINK_UDP_PORT = 14550
 
+# MPA server channels. The MAVLink channel publishes and accepts encoded wire
+# bytes, not libmodal-pipe's in-memory mavlink_message_t representation.
+OSD_PIPE_CHANNEL = 0
+MAVLINK_PIPE_CHANNEL = 1
+SERVER_FLAG_EN_CONTROL_PIPE = 1 << 0
+
 rebooting = False
+slpi_ready = False
 
 # Last seen MAVLink ground station address (learned from the first inbound UDP
 # packet). MAVLink telemetry coming up from the DSP is sent to this address.
@@ -35,6 +42,9 @@ stats = {
     "mav_up_pkts":     0, "mav_up_bytes":     0,  # DSP -> UDP (to GCS)
     "mav_dn_pkts":     0, "mav_dn_bytes":     0,  # UDP -> DSP (from GCS)
     "mav_up_dropped":  0,                          # frames from DSP dropped (no GCS peer yet)
+    "mav_mpa_up_pkts": 0, "mav_mpa_up_bytes": 0,  # DSP -> MPA data pipe
+    "mav_mpa_dn_pkts": 0, "mav_mpa_dn_bytes": 0,  # MPA control pipe -> DSP
+    "mav_mpa_errors":  0,
     "msp_up_pkts":     0, "msp_up_bytes":     0,  # DSP -> WS (to Configurator)
     "msp_dn_pkts":     0, "msp_dn_bytes":     0,  # WS -> DSP (from Configurator)
     "osd_pkts":        0, "osd_bytes":        0,  # DSP -> OSD pipe (single direction)
@@ -52,6 +62,9 @@ def stats_printer():
                 f"[1s] MAVLink up={snap['mav_up_pkts']}p/{snap['mav_up_bytes']}B "
                 f"dn={snap['mav_dn_pkts']}p/{snap['mav_dn_bytes']}B "
                 f"dropped={snap['mav_up_dropped']}\n"
+                f"     MAV MPA up={snap['mav_mpa_up_pkts']}p/{snap['mav_mpa_up_bytes']}B "
+                f"dn={snap['mav_mpa_dn_pkts']}p/{snap['mav_mpa_dn_bytes']}B "
+                f"errors={snap['mav_mpa_errors']}\n"
                 f"     MSP     up={snap['msp_up_pkts']}p/{snap['msp_up_bytes']}B "
                 f"dn={snap['msp_dn_pkts']}p/{snap['msp_dn_bytes']}B\n"
                 f"     OSD     up={snap['osd_pkts']}p/{snap['osd_bytes']}B"
@@ -80,7 +93,7 @@ async def handle_websocket(websocket, path):
                 continue
             # Prepend MSP tag so the DSP routes to the MSP ring buffer.
             tagged = bytes([TAG_MSP]) + bytes(message)
-            betaflight.slpi_link_send(tagged, c_ulong(len(tagged)))
+            betaflight.slpi_link_send(tagged, c_uint32(len(tagged)))
             with stats_lock:
                 stats["msp_dn_pkts"] += 1
                 stats["msp_dn_bytes"] += len(message)
@@ -118,7 +131,7 @@ def receive_mavlink_udp():
                     mavlink_peer = addr
             if not rebooting:
                 tagged = bytes([TAG_MAVLINK]) + data
-                betaflight.slpi_link_send(tagged, c_ulong(len(tagged)))
+                betaflight.slpi_link_send(tagged, c_uint32(len(tagged)))
                 with stats_lock:
                     stats["mav_dn_pkts"] += 1
                     stats["mav_dn_bytes"] += len(data)
@@ -130,6 +143,27 @@ def bytearray_to_const_void_ptr(data: bytearray) -> c_void_p:
 
     return ptr
 
+def mavlink_mpa_control_cb(ch, data, length, context):
+    """Forward encoded MAVLink bytes from the MPA control pipe to the DSP."""
+    global rebooting
+    global slpi_ready
+    if ch != MAVLINK_PIPE_CHANNEL or length <= 0:
+        return
+    if rebooting or not slpi_ready:
+        with stats_lock:
+            stats["mav_mpa_errors"] += 1
+        return
+
+    payload = string_at(data, length)
+    tagged = bytes([TAG_MAVLINK]) + payload
+    result = betaflight.slpi_link_send(tagged, c_uint32(len(tagged)))
+    with stats_lock:
+        if result == 0:
+            stats["mav_mpa_dn_pkts"] += 1
+            stats["mav_mpa_dn_bytes"] += length
+        else:
+            stats["mav_mpa_errors"] += 1
+
 def py_cb_func(data, len):
     global server_connection
     global rebooting
@@ -137,6 +171,7 @@ def py_cb_func(data, len):
     global betaflight
     global cb_func
     global mavlink_peer
+    global slpi_ready
 
     # print('Got data callback')
 
@@ -164,7 +199,7 @@ def py_cb_func(data, len):
         binary_data = bytearray(payload_len)
         for i in range(1, len):
             binary_data[i-1] = data_array[i]
-        pympa.pipe_server_write(0, bytearray_to_const_void_ptr(binary_data), payload_len);
+        pympa.pipe_server_write(OSD_PIPE_CHANNEL, bytearray_to_const_void_ptr(binary_data), payload_len);
         with stats_lock:
             stats["osd_pkts"] += 1
             stats["osd_bytes"] += payload_len
@@ -173,6 +208,19 @@ def py_cb_func(data, len):
         binary_data = bytearray(payload_len)
         for i in range(1, len):
             binary_data[i-1] = data_array[i]
+
+        result = pympa.pipe_server_write(
+            MAVLINK_PIPE_CHANNEL,
+            bytearray_to_const_void_ptr(binary_data),
+            payload_len,
+        )
+        with stats_lock:
+            if result == 0:
+                stats["mav_mpa_up_pkts"] += 1
+                stats["mav_mpa_up_bytes"] += payload_len
+            else:
+                stats["mav_mpa_errors"] += 1
+
         with mavlink_peer_lock:
             peer = mavlink_peer
         if peer is not None:
@@ -190,6 +238,7 @@ def py_cb_func(data, len):
         if not rebooting:
             print('Got reboot command')
             rebooting = True
+            slpi_ready = False
             # Reset SLPI
             betaflight.slpi_link_reset(None)
             # Wait for SLPI to reboot
@@ -197,6 +246,7 @@ def py_cb_func(data, len):
             print('Calling slpi_link_init to re-initialize')
             result = betaflight.slpi_link_init(False, cb_func, b'betaflight.so')
             print('slpi_link_init returned: ' + str(result))
+            slpi_ready = result == 0
             rebooting = False
         # else:
         #     print("Got duplicate reboot command while rebooting")
@@ -222,28 +272,74 @@ class PIPE_INFO(Structure):
                 ("size_bytes", c_int),
                 ("server_pid", c_int)]
 
-info = PIPE_INFO()
-info.name = b'msp_osd'
-info.type = b'msp_dp_cmd_t'
-info.server_name = b'betaflight'
-info.size_bytes = 4096
-info.server_pid = 0
+pympa.pipe_server_create.argtypes = [c_int, PIPE_INFO, c_int]
+pympa.pipe_server_create.restype = c_int
+pympa.pipe_server_write.argtypes = [c_int, c_void_p, c_int]
+pympa.pipe_server_write.restype = c_int
+pympa.pipe_server_set_control_pipe_size.argtypes = [c_int, c_int, c_int]
+pympa.pipe_server_set_control_pipe_size.restype = c_int
+pympa.pipe_server_close.argtypes = [c_int]
+pympa.pipe_server_close.restype = None
 
-success = pympa.pipe_server_create(0, info, 0);
+osd_info = PIPE_INFO()
+osd_info.name = b'msp_osd'
+osd_info.type = b'msp_dp_cmd_t'
+osd_info.server_name = b'betaflight'
+osd_info.size_bytes = 4096
+osd_info.server_pid = 0
+
+success = pympa.pipe_server_create(OSD_PIPE_CHANNEL, osd_info, 0);
 if success == -1:
     print('ERROR: Could not create OSD MPA server pipe')
     sys.exit(-1)
 
 betaflight = CDLL('libslpi_link.so.1')
 
+# Bidirectional MAVLink byte-stream pipe. Clients subscribe to the data pipe for
+# DSP telemetry and write encoded MAVLink frames to the control pipe for DSP RX.
+mavlink_info = PIPE_INFO()
+mavlink_info.name = b'betaflight_mavlink'
+mavlink_info.type = b'mavlink_wire'
+mavlink_info.server_name = b'betaflight'
+mavlink_info.size_bytes = 1024 * 1024
+mavlink_info.server_pid = 0
+
+success = pympa.pipe_server_set_control_pipe_size(MAVLINK_PIPE_CHANNEL, 1024 * 1024, 1024)
+if success == -1:
+    print('ERROR: Could not configure MAVLink MPA control pipe')
+    pympa.pipe_server_close(OSD_PIPE_CHANNEL)
+    sys.exit(-1)
+
+success = pympa.pipe_server_create(
+    MAVLINK_PIPE_CHANNEL,
+    mavlink_info,
+    SERVER_FLAG_EN_CONTROL_PIPE,
+)
+if success == -1:
+    print('ERROR: Could not create MAVLink MPA server pipe')
+    pympa.pipe_server_close(OSD_PIPE_CHANNEL)
+    sys.exit(-1)
+
+MPA_CONTROL_CB = CFUNCTYPE(None, c_int, c_void_p, c_int, c_void_p)
+pympa.pipe_server_set_control_cb.argtypes = [c_int, MPA_CONTROL_CB, c_void_p]
+pympa.pipe_server_set_control_cb.restype = c_int
+mavlink_mpa_cb = MPA_CONTROL_CB(mavlink_mpa_control_cb)
+success = pympa.pipe_server_set_control_cb(MAVLINK_PIPE_CHANNEL, mavlink_mpa_cb, None)
+if success == -1:
+    print('ERROR: Could not install MAVLink MPA control callback')
+    pympa.pipe_server_close(MAVLINK_PIPE_CHANNEL)
+    pympa.pipe_server_close(OSD_PIPE_CHANNEL)
+    sys.exit(-1)
+
 # typedef void (*slpi_link_cb)(const uint8_t *data, uint32_t length_in_bytes);
-CBFUNC = CFUNCTYPE(None, POINTER(c_ubyte), c_ulong)
+CBFUNC = CFUNCTYPE(None, POINTER(c_ubyte), c_uint32)
 cb_func = CBFUNC(py_cb_func)
 
 print('Calling slpi_link_init')
 
 # int slpi_link_init(bool enable_debug_messages, slpi_link_cb callback, const char *library_name);
 result = betaflight.slpi_link_init(False, cb_func, b'betaflight.so')
+slpi_ready = result == 0
 
 print('slpi_link_init returned: ' + str(result))
 
@@ -252,6 +348,7 @@ mavlink_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 mavlink_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 mavlink_socket.bind(('', MAVLINK_UDP_PORT))
 print(f"MAVLink UDP listening on 0.0.0.0:{MAVLINK_UDP_PORT}")
+print("MAVLink MPA listening on /run/mpa/betaflight_mavlink/")
 
 mavlink_thread = threading.Thread(target=receive_mavlink_udp, daemon=True)
 mavlink_thread.start()
@@ -282,9 +379,9 @@ except KeyboardInterrupt:
 
 print('Exiting...')
 
-# Close OSD MSP pipe
-# pympa_close_pub(mpa_channel)
-pympa.pipe_server_close(0)
+# Close MPA pipes
+pympa.pipe_server_close(MAVLINK_PIPE_CHANNEL)
+pympa.pipe_server_close(OSD_PIPE_CHANNEL)
 
 # Reset SLPI
 betaflight.slpi_link_reset(None)
