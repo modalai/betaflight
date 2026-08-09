@@ -149,7 +149,7 @@ static bool log_data_received;
 static volatile bool log_flush_requested;
 static volatile bool log_flush_complete;
 static const char dir_path[] = "/data/betaflight";
-static const char logfile[] = "log.bin";
+static const char logfile[] = "log.bbl";
 static char full_log_path[128];
 
 // Receive buffer support for MSP data coming from betaflight configurator
