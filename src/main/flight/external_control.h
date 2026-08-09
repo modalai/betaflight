@@ -41,6 +41,12 @@ typedef enum {
     EXTERNAL_CONTROL_REJECT_YAW_RATE_NOT_FINITE,
 } externalControlRejectReason_e;
 
+typedef enum {
+    EXTERNAL_CONTROL_MODE_DISABLED = 0,
+    EXTERNAL_CONTROL_MODE_ACTIVE,
+    EXTERNAL_CONTROL_MODE_ANGLE_FALLBACK,
+} externalControlModeState_e;
+
 // Transport-neutral input. The quaternion uses Betaflight's body-FLU to
 // earth-NWU convention. Transport adapters must convert into this convention.
 typedef struct externalControlSetpointInput_s {
@@ -70,10 +76,9 @@ typedef struct externalControlDiagnostics_s {
     bool roundTripTimeValid;
 } externalControlDiagnostics_t;
 
-// Output of the passive attitude-controller calculation. Rates use the same
-// body-FLU, degrees/second convention consumed by Betaflight's rate PID. This
-// structure is diagnostic-only until a later, explicitly gated integration
-// connects it to the PID and mixer paths.
+// Output of the external attitude-controller calculation. Rates use the same
+// body-FLU, degrees/second convention consumed by Betaflight's rate PID. The
+// output remains available for diagnostics when external authority is off.
 typedef struct externalControlShadowCommand_s {
     float rate[XYZ_AXIS_COUNT];
     float attitudeError[XYZ_AXIS_COUNT]; // shortest-path body error vector, radians
@@ -88,6 +93,10 @@ void externalControlRecordRejection(externalControlRejectReason_e reason);
 bool externalControlGetSetpoint(externalControlSetpoint_t *setpoint);
 bool externalControlGetDiagnostics(externalControlDiagnostics_t *diagnostics);
 bool externalControlIsFresh(timeUs_t currentTimeUs, timeDelta_t timeoutUs);
+bool externalControlUpdateMode(bool requested, bool permitted, timeUs_t currentTimeUs);
+bool externalControlIsActive(void);
+bool externalControlIsAngleFallbackActive(void);
 void externalControlUpdateShadowCommand(timeUs_t currentTimeUs);
 bool externalControlGetShadowCommand(externalControlShadowCommand_t *command);
+bool externalControlGetActiveCommand(externalControlShadowCommand_t *command);
 void externalControlUpdateDebug(timeUs_t currentTimeUs);

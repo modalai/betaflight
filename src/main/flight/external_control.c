@@ -39,9 +39,9 @@
 #define EXTERNAL_CONTROL_QUATERNION_NORM_SQUARED_MAX 1.5f
 #define EXTERNAL_CONTROL_MAX_RTT_MS 10000U
 
-// Provisional shadow-controller values match PX4's multicopter defaults. They
-// remain compile-time constants until shadow testing establishes the parameter
-// ranges needed for a dedicated external-control configuration group.
+// Provisional controller values match PX4's multicopter defaults. They remain
+// compile-time constants until bench testing establishes the parameter ranges
+// needed for a dedicated external-control configuration group.
 static const float externalControlAttitudeGain[XYZ_AXIS_COUNT] = { 4.0f, 4.0f, 2.8f };
 static const float externalControlRateLimit[XYZ_AXIS_COUNT] = { 220.0f, 220.0f, 200.0f };
 
@@ -50,12 +50,17 @@ enum {
     EXTERNAL_CONTROL_STATE_FRESH = 1 << 1,
     EXTERNAL_CONTROL_STATE_HAS_YAW_RATE = 1 << 2,
     EXTERNAL_CONTROL_STATE_RTT_VALID = 1 << 3,
+    EXTERNAL_CONTROL_STATE_MODE_REQUESTED = 1 << 7,
+    EXTERNAL_CONTROL_STATE_MODE_ACTIVE = 1 << 8,
+    EXTERNAL_CONTROL_STATE_ANGLE_FALLBACK = 1 << 9,
 };
 
 static externalControlSetpoint_t setpoint;
 static externalControlDiagnostics_t diagnostics;
 static externalControlShadowCommand_t shadowCommand;
 static bool setpointValid;
+static bool modeRequested;
+static externalControlModeState_e modeState;
 
 static int16_t externalControlDebugValue(float value)
 {
@@ -209,6 +214,50 @@ bool externalControlIsFresh(timeUs_t currentTimeUs, timeDelta_t timeoutUs)
         cmpTimeUs(currentTimeUs, currentSetpoint.receivedAtUs) <= timeoutUs;
 }
 
+bool externalControlUpdateMode(bool requested, bool permitted, timeUs_t currentTimeUs)
+{
+    externalControlModeState_e currentState;
+    ATOMIC_BLOCK(NVIC_PRIO_MAX) {
+        currentState = modeState;
+    }
+
+    externalControlModeState_e nextState;
+    if (!requested) {
+        // Cycling the pilot's switch is the only way to clear a fallback latch.
+        nextState = EXTERNAL_CONTROL_MODE_DISABLED;
+    } else if (currentState == EXTERNAL_CONTROL_MODE_ANGLE_FALLBACK) {
+        nextState = EXTERNAL_CONTROL_MODE_ANGLE_FALLBACK;
+    } else if (permitted && externalControlIsFresh(currentTimeUs, EXTERNAL_CONTROL_DEFAULT_TIMEOUT_US)) {
+        nextState = EXTERNAL_CONTROL_MODE_ACTIVE;
+    } else {
+        nextState = EXTERNAL_CONTROL_MODE_ANGLE_FALLBACK;
+    }
+
+    ATOMIC_BLOCK(NVIC_PRIO_MAX) {
+        modeRequested = requested;
+        modeState = nextState;
+    }
+    return nextState != currentState;
+}
+
+bool externalControlIsActive(void)
+{
+    bool active;
+    ATOMIC_BLOCK(NVIC_PRIO_MAX) {
+        active = modeState == EXTERNAL_CONTROL_MODE_ACTIVE && shadowCommand.valid;
+    }
+    return active;
+}
+
+bool externalControlIsAngleFallbackActive(void)
+{
+    bool active;
+    ATOMIC_BLOCK(NVIC_PRIO_MAX) {
+        active = modeState == EXTERNAL_CONTROL_MODE_ANGLE_FALLBACK;
+    }
+    return active;
+}
+
 void externalControlUpdateShadowCommand(timeUs_t currentTimeUs)
 {
     externalControlSetpoint_t currentSetpoint = { 0 };
@@ -254,12 +303,24 @@ void externalControlUpdateShadowCommand(timeUs_t currentTimeUs)
         command.thrust = currentSetpoint.thrust;
     }
 
+    bool currentModeRequested;
+    externalControlModeState_e currentModeState;
     ATOMIC_BLOCK(NVIC_PRIO_MAX) {
         shadowCommand = command;
+        // Drop authority at PID-loop cadence rather than waiting for the slower
+        // RX mode task. The fallback remains latched until the switch is cycled.
+        if (modeState == EXTERNAL_CONTROL_MODE_ACTIVE && !command.valid) {
+            modeState = EXTERNAL_CONTROL_MODE_ANGLE_FALLBACK;
+        }
+        currentModeRequested = modeRequested;
+        currentModeState = modeState;
     }
 
     int16_t state = externalControlStateFlags(valid, fresh, &currentSetpoint, &currentDiagnostics);
     state |= (int16_t)command.saturationMask << 4;
+    state |= currentModeRequested ? EXTERNAL_CONTROL_STATE_MODE_REQUESTED : 0;
+    state |= currentModeState == EXTERNAL_CONTROL_MODE_ACTIVE ? EXTERNAL_CONTROL_STATE_MODE_ACTIVE : 0;
+    state |= currentModeState == EXTERNAL_CONTROL_MODE_ANGLE_FALLBACK ? EXTERNAL_CONTROL_STATE_ANGLE_FALLBACK : 0;
     DEBUG_SET(DEBUG_EXTERNAL_CONTROL_COMMAND, 0, state);
     DEBUG_SET(DEBUG_EXTERNAL_CONTROL_COMMAND, 1, externalControlDebugValue(command.thrust * 10000.0f));
     DEBUG_SET(DEBUG_EXTERNAL_CONTROL_COMMAND, 2, externalControlDebugValue(command.rate[FD_ROLL] * 10.0f));
@@ -279,6 +340,16 @@ bool externalControlGetShadowCommand(externalControlShadowCommand_t *result)
         *result = shadowCommand;
     }
     return result->valid;
+}
+
+bool externalControlGetActiveCommand(externalControlShadowCommand_t *result)
+{
+    bool active;
+    ATOMIC_BLOCK(NVIC_PRIO_MAX) {
+        *result = shadowCommand;
+        active = modeState == EXTERNAL_CONTROL_MODE_ACTIVE && shadowCommand.valid;
+    }
+    return active;
 }
 
 void externalControlUpdateDebug(timeUs_t currentTimeUs)

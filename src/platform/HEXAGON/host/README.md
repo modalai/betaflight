@@ -18,7 +18,7 @@ also runs on VOXL; the remaining files are laptop-side tooling.
 | `betaflight` | voxl3 device | Loads `libslpi_link.so.1`, multiplexes MSP / MAVLink / OSD over the SLPI link. |
 | `voxl-configurator` | laptop | Sets up `adb forward` and opens the Betaflight Configurator PWA in a dedicated Chrome window. |
 | `bf_gcs.py` | laptop | Minimal Tkinter MAVLink GCS with joystick → `RC_OVERRIDE`. |
-| `bf_external_control_loopback.py` | voxl3 device | Echoes `ATTITUDE_TARGET` to `SET_ATTITUDE_TARGET` through the MPA pipe for passive validation. |
+| `bf_external_control_loopback.py` | voxl3 device | Echoes `ATTITUDE_TARGET` to `SET_ATTITUDE_TARGET` through the MPA pipe for bench validation. |
 | `voxl-inspect-osd` | laptop | Prints the OSD MPA pipe contents (debug only). |
 | `ws2tcp.py`, `ws2udp.py`, `betaflight_udp` | laptop / voxl2 | Legacy bridges from the voxl2 era. Not used on voxl3. |
 
@@ -96,7 +96,7 @@ This is intentionally a byte stream rather than the platform-specific
 `mavlink_message_t` memory layout, so the virtual UART and a future physical
 UART use the same framing.
 
-For the passive loopback test on the device (disarmed, with propellers removed):
+For the loopback test on the device (with propellers removed):
 
 ```sh
 python3 bf_external_control_loopback.py --rate-hz 20
@@ -107,21 +107,22 @@ checksum, and by default preserves timestamp/quaternion/yaw-rate/thrust/type-mas
 fields when returning it as `SET_ATTITUDE_TARGET`. It uses only Python's
 standard library and `libmodal_pipe.so`.
 
-While this firmware phase remains passive, optional `--thrust 0.25`,
-`--yaw-rate 0.5`, and attitude-offset arguments can exercise the shadow
-controller without reaching the active PID setpoint or mixer. The offsets are
-specified in Betaflight's native body-FLU axes and degrees. For example:
+Optional `--thrust 0.25`, `--yaw-rate 0.5`, and attitude-offset arguments can
+exercise the controller. The offsets are specified in Betaflight's native
+body-FLU axes and degrees. For example:
 
 ```sh
 python3 bf_external_control_loopback.py --rate-hz 20 --thrust 0.25 \
     --roll-offset 10
 ```
 
-Do not use these overrides after external setpoints gain control authority.
+With `EXTERNAL CTRL` deselected, these values are diagnostic only. They become
+live PID and thrust commands as soon as that mode is selected, so never select
+it with these bench overrides unless the propellers have been removed.
 
 ## External-control Blackbox diagnostics
 
-Three debug modes are available for passive validation:
+Three debug modes are available for validation:
 
 - `EXT_CTRL_RX`: state flags, setpoint age (ms), loopback RTT (ms), receive
   interval (0.1 ms), quaternion norm error (x10000), thrust (x10000), yaw rate
@@ -129,23 +130,25 @@ Three debug modes are available for passive validation:
 - `EXT_CTRL_ATT`: state flags, setpoint age (ms), thrust (x10000), yaw rate
   (deg/s x10), and X/Y/Z shortest-path attitude error (deg x10), followed by
   the last rejection code.
-- `EXT_CTRL_CMD`: state flags plus rate-saturation flags, command thrust
-  (x10000), roll/pitch/yaw shadow rate (deg/s x10), and roll/pitch/yaw
+- `EXT_CTRL_CMD`: state flags plus rate-saturation and authority flags, command
+  thrust (x10000), roll/pitch/yaw controller rate (deg/s x10), and roll/pitch/yaw
   shortest-path attitude error (deg x10).
 
-The state flags are valid=`1`, fresh=`2`, yaw-rate-present=`4`, and
-RTT-valid=`8`. A steady passive loopback should normally report state `15`,
-zero thrust, small attitude error, and rejection code `0`. VFC's normal
-zero-valued source timestamp leaves RTT invalid, so its healthy state is `7`.
-Rejection codes are target=`1`, type-mask=`2`, non-finite attitude=`3`, bad
-quaternion norm=`4`, non-finite thrust=`5`, out-of-range thrust=`6`, and
-non-finite yaw rate=`7`.
+The transport state flags are valid=`1`, fresh=`2`, yaw-rate-present=`4`, and
+RTT-valid=`8`. `EXT_CTRL_CMD` additionally reports roll/pitch/yaw rate limiting
+as `16`/`32`/`64`, mode requested as `128`, external authority active as `256`,
+and the latched Angle fallback as `512`. A steady loopback with the mode
+deselected should normally report state `15`; selecting the mode makes it
+`399`. VFC's normal zero-valued source timestamp leaves RTT invalid, so its
+equivalent healthy states are `7` and `391`. Rejection codes are target=`1`,
+type-mask=`2`, non-finite attitude=`3`, bad quaternion norm=`4`, non-finite
+thrust=`5`, out-of-range thrust=`6`, and non-finite yaw rate=`7`.
 
 The logged yaw rate is Betaflight-native and CCW-positive. MAVLink/PX4 body-FRD
 yaw is clockwise-positive, so a loopback override of `--yaw-rate 0.5` should
 appear near `-286` in the x10-deg/s debug channel.
 
-The shadow controller currently uses the provisional PX4 multicopter defaults:
+The controller currently uses the provisional PX4 multicopter defaults:
 attitude gains of 4.0/4.0/2.8 per second and rate limits of 220/220/200 deg/s.
 It adds VFC's yaw-rate input as an earth-vertical feed-forward projected into
 the current body frame. These constants are deliberately not user parameters
@@ -179,10 +182,66 @@ saturation bit (`16`) to debug 0, making the usual loopback state `31`.
 Stopping the loopback should make the fresh bit clear after 200 ms; debug 0
 returns to `13`, while command thrust, rates, and errors all become zero.
 
-`EXT_CTRL_CMD` is calculated at the start of the normal PID loop so its timing
-matches a future integration point. In this phase its result is only copied to
-a diagnostic mailbox and debug channels. It does not modify RC input,
-`pidSetpoint`, the rate PID, mixer throttle, arming state, or motor output.
+`EXT_CTRL_CMD` is calculated at the start of the normal PID loop. With external
+authority active, its rate outputs replace the RC rate setpoints and its
+normalized thrust replaces RC throttle at the mixer input. Configured throttle
+limits and the normal motor-output safety path still apply; throttle boost is
+not applied to external thrust. Betaflight's standard Blackbox setpoint and
+mixer-throttle fields therefore record the commands that actually reached
+these paths.
+
+## External-control authority and fallback
+
+Assign `EXTERNAL CTRL` to a deliberate AUX range in Configurator's Modes tab.
+The vehicle refuses to arm while that range is selected and reports
+`EXTCTRL_SW`; arm with the mode off, then select it after the external stream is
+healthy. External authority requires an accelerometer, valid RC flight
+channels, a multirotor without 3D enabled, and no failsafe, navigation,
+crash-flip, launch-control, or chirp mode.
+
+While selected and healthy, external attitude-generated rates and external
+thrust control the aircraft. If the stream becomes stale for 200 ms or an
+incompatible condition appears, external authority is removed and the
+controller immediately falls back to Angle mode with roll, pitch, yaw, and
+throttle coming from the RC sticks. An RC link loss still invokes Betaflight's
+normal failsafe rather than pretending that stale sticks are pilot control.
+
+The fallback is latched: a resumed external stream does not take authority
+back. Move the `EXTERNAL CTRL` switch out of its range and deliberately select
+it again to re-engage. During any future flight test, keep the RC throttle near
+a value that can sustain the aircraft before selecting external control; that
+stick becomes the immediate throttle command if fallback occurs.
+
+### First active-path test
+
+Remove all propellers and select `EXT_CTRL_CMD` as the debug mode. Assign the
+new mode to an AUX switch, leave it deselected, and run a conservative loopback:
+
+```sh
+python3 bf_external_control_loopback.py --rate-hz 20 --thrust 0.10
+```
+
+Check the control-state sequence while disarmed:
+
+1. With `EXTERNAL CTRL` off, debug 0 should be `15`; the generated values are
+   visible but do not have authority.
+2. Select `EXTERNAL CTRL`. Debug 0 should be `399`, Configurator should show the
+   mode active, and arming should be blocked by `EXTCTRL_SW`.
+3. Stop the loopback. After 200 ms, debug 0 should become `653` and Angle mode
+   should activate. Move the sticks and verify the live PID setpoints follow
+   them.
+4. Restart the loopback. Debug 0 should become `655`, but external authority
+   must remain off. Cycle the AUX switch off and on; the state should go from
+   `15` to `399`.
+
+Only after that sequence passes, perform the first armed motor test, still with
+all propellers removed. Run the same zero-offset, 0.10-thrust loopback; arm with
+`EXTERNAL CTRL` off, then select it and verify that the logged mixer throttle is
+about 0.10, adjusted only if a throttle limit is configured. Stop the loopback
+and confirm that control returns to Angle mode and RC throttle after 200 ms. Be
+ready to disarm throughout. Review the
+Blackbox setpoint, gyro, PID, mixer-throttle, motor, and `EXT_CTRL_CMD` fields
+before considering any test with propellers.
 
 Select one mode before a log, for example:
 

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Passive SET_ATTITUDE_TARGET loopback for Betaflight on VOXL.
+"""SET_ATTITUDE_TARGET bench loopback for Betaflight on VOXL.
 
 Subscribe to encoded MAVLink bytes from the ``betaflight_mavlink`` MPA pipe,
 turn each ATTITUDE_TARGET into a SET_ATTITUDE_TARGET, and send it back through
 the pipe's control FIFO. This version has no pymavlink dependency.
 
-This is a bench validation tool for the passive phase of external control.
-Keep the vehicle disarmed and remove propellers.
+This is a bench validation tool for external control. Remove propellers before
+selecting EXTERNAL CTRL; its overrides become live whenever the vehicle is armed.
 """
 
 import argparse
@@ -252,7 +252,7 @@ class Loopback:
             return
 
         # ATTITUDE_TARGET and SET_ATTITUDE_TARGET share their first 36 payload
-        # bytes. Optional bench-only overrides exercise the passive input path.
+        # bytes. Optional bench-only overrides exercise the controller path.
         type_mask = mavlink_frame.payload[36]
         common_payload = bytearray(mavlink_frame.payload[:36])
         if self.attitude_offset_mavlink is not None:
@@ -360,7 +360,7 @@ def main():
     loopback = Loopback(args)
     loopback.open()
     print(f"Connected to {args.pipe}; requesting ATTITUDE_TARGET at {args.rate_hz:g} Hz")
-    print("BENCH ONLY: keep the vehicle disarmed and remove propellers")
+    print("BENCH ONLY: remove propellers before selecting EXTERNAL CTRL")
     if args.thrust is not None or args.yaw_rate is not None:
         print(f"Overrides: thrust={args.thrust!r}, MAVLink yaw_rate={args.yaw_rate!r} rad/s")
     if args.roll_offset or args.pitch_offset or args.yaw_offset:

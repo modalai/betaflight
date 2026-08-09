@@ -47,6 +47,9 @@
 
 #include "flight/alt_hold.h"
 #include "flight/autopilot.h"
+#ifdef USE_EXTERNAL_CONTROL
+#include "flight/external_control.h"
+#endif
 #include "flight/failsafe.h"
 #include "flight/gps_rescue.h"
 #include "flight/imu.h"
@@ -676,10 +679,26 @@ static void applyMixerAdjustment(float *motorMix, const float motorMixMin, const
 FAST_CODE_NOINLINE void mixTable(timeUs_t currentTimeUs)
 {
     const bool launchControlActive = isLaunchControlActive();
-    const bool airmodeEnabled = isAirmodeEnabled() || launchControlActive;
+#ifdef USE_EXTERNAL_CONTROL
+    externalControlShadowCommand_t externalCommand;
+    const bool externalControlActive = externalControlGetActiveCommand(&externalCommand);
+#endif
+    const bool airmodeEnabled = isAirmodeEnabled() || launchControlActive
+#ifdef USE_EXTERNAL_CONTROL
+        || externalControlActive
+#endif
+        ;
 
     // Find min and max throttle based on conditions. Throttle has to be known before mixing
     calculateThrottleAndCurrentMotorEndpoints(currentTimeUs);
+#ifdef USE_EXTERNAL_CONTROL
+    if (externalControlActive) {
+        // External thrust is a normalized collective command. It enters at the
+        // same point as normalized stick throttle, so configured throttle
+        // limits and the normal mixer/output safety path still apply.
+        throttle = externalCommand.thrust;
+    }
+#endif
 
     if (applyCrashFlipModeToMotors()) {
         return;
@@ -735,7 +754,11 @@ FAST_CODE_NOINLINE void mixTable(timeUs_t currentTimeUs)
 
     // apply throttle boost when throttle moves quickly
 #if defined(USE_THROTTLE_BOOST)
-    if (throttleBoost > 0.0f) {
+    if (throttleBoost > 0.0f
+#ifdef USE_EXTERNAL_CONTROL
+        && !externalControlActive
+#endif
+        ) {
         const float throttleHpf = throttle - pt1FilterApply(&throttleLpf, throttle);
         throttle = constrainf(throttle + throttleBoost * throttleHpf, 0.0f, 1.0f);
     }

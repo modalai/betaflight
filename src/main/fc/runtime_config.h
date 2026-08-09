@@ -69,7 +69,12 @@ typedef enum {
     ARMING_DISABLED_ALTHOLD         = (1 << 26),
     ARMING_DISABLED_POSHOLD         = (1 << 27),
     ARMING_DISABLED_AUTOPILOT       = (1 << 28),
+#ifdef USE_EXTERNAL_CONTROL
+    ARMING_DISABLED_EXTERNAL_CONTROL = (1 << 29),
+    ARMING_DISABLED_ARM_SWITCH      = (1 << 30) // Needs to be the last element, since it's always activated if one of the others is active when arming
+#else
     ARMING_DISABLED_ARM_SWITCH      = (1 << 29) // Needs to be the last element, since it's always activated if one of the others is active when arming
+#endif
 } armingDisableFlags_e;
 
 #define ARMING_DISABLE_FLAGS_COUNT (LOG2(ARMING_DISABLED_ARM_SWITCH) + 1)
@@ -138,4 +143,3 @@ bool sensors(uint32_t mask);
 void sensorsSet(uint32_t mask);
 void sensorsClear(uint32_t mask);
 uint32_t sensorsMask(void);
-

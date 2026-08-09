@@ -964,9 +964,9 @@ static void mavlinkSendAttitudeTarget(void)
     quaternion_t attitudeQuaternion;
     getQuaternion(&attitudeQuaternion);
 
-    // Inverse of the receive-side NED/FRD to NWU/FLU conversion. This passive
+    // Inverse of the receive-side NED/FRD to NWU/FLU conversion. This bench
     // reference deliberately reports measured attitude with zero thrust; it
-    // does not expose an active flight-control setpoint or command the mixer.
+    // does not expose the active flight-control setpoint or command the mixer.
     const float q[4] = {
         attitudeQuaternion.w,
         attitudeQuaternion.x,

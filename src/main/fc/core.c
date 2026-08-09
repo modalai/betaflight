@@ -60,6 +60,9 @@
 #include "fc/stats.h"
 
 #include "flight/failsafe.h"
+#ifdef USE_EXTERNAL_CONTROL
+#include "flight/external_control.h"
+#endif
 #include "flight/gps_rescue.h"
 #include "flight/alt_hold.h"
 #include "flight/pos_hold.h"
@@ -254,7 +257,11 @@ static bool accNeedsCalibration(void)
             isModeActivationConditionPresent(BOXGPSRESCUE) ||
             isModeActivationConditionPresent(BOXCAMSTAB) ||
             isModeActivationConditionPresent(BOXCALIB) ||
-            isModeActivationConditionPresent(BOXACROTRAINER)) {
+            isModeActivationConditionPresent(BOXACROTRAINER)
+#ifdef USE_EXTERNAL_CONTROL
+            || isModeActivationConditionPresent(BOXEXTERNALCONTROL)
+#endif
+            ) {
 
             return true;
         }
@@ -377,6 +384,17 @@ if (crashFlipModeActive) {
             setArmingDisabled(ARMING_DISABLED_AUTOPILOT);
         } else {
             unsetArmingDisabled(ARMING_DISABLED_AUTOPILOT);
+        }
+#endif
+
+#ifdef USE_EXTERNAL_CONTROL
+        // The pilot must arm with external authority deselected, then make a
+        // deliberate in-flight selection. This prevents a live thrust target
+        // from taking effect immediately on arming.
+        if (IS_RC_MODE_ACTIVE(BOXEXTERNALCONTROL)) {
+            setArmingDisabled(ARMING_DISABLED_EXTERNAL_CONTROL);
+        } else {
+            unsetArmingDisabled(ARMING_DISABLED_EXTERNAL_CONTROL);
         }
 #endif
 
@@ -839,8 +857,16 @@ bool processRx(timeUs_t currentTimeUs)
         failsafeStartMonitoring();
     }
 
-    const bool throttleActive = calculateThrottleStatus() != THROTTLE_LOW;
-    const uint8_t throttlePercent = calculateThrottlePercentAbs();
+    bool throttleActive = calculateThrottleStatus() != THROTTLE_LOW;
+    uint8_t throttlePercent = calculateThrottlePercentAbs();
+#ifdef USE_EXTERNAL_CONTROL
+    externalControlShadowCommand_t externalCommand;
+    const bool externalControlActive = externalControlGetActiveCommand(&externalCommand);
+    if (externalControlActive) {
+        throttleActive = externalCommand.thrust > 0.0f;
+        throttlePercent = constrain(lrintf(externalCommand.thrust * 100.0f), 0, 100);
+    }
+#endif
     const bool launchControlActive = isLaunchControlActive();
     static bool isAirmodeActive;
 
@@ -858,7 +884,11 @@ bool processRx(timeUs_t currentTimeUs)
 
     // Note: If Airmode is enabled, on arming, iTerm and PIDs will be off until throttle exceeds the threshold (OFF while disarmed)
     // If not, iTerm will be off at low throttle, with pidStabilisationState determining whether PIDs will be active
-    if (ARMING_FLAG(ARMED) && (isAirmodeActive || throttleActive || launchControlActive || isFixedWing())) {
+    if (ARMING_FLAG(ARMED) && (isAirmodeActive || throttleActive || launchControlActive || isFixedWing()
+#ifdef USE_EXTERNAL_CONTROL
+        || externalControlActive
+#endif
+        )) {
         pidSetItermReset(false);
         pidStabilisationState(PID_STABILISATION_ON);
     } else {
@@ -889,7 +919,11 @@ bool processRx(timeUs_t currentTimeUs)
         if (!featureIsEnabled(FEATURE_MOTOR_STOP) || isAirmodeEnabled() || throttleActive) { // are motors running?
             const uint8_t lowThrottleLimit = pidConfig()->runaway_takeoff_deactivate_throttle;
             const uint8_t midThrottleLimit = constrain(lowThrottleLimit * 2, lowThrottleLimit * 2, RUNAWAY_TAKEOFF_HIGH_THROTTLE_PERCENT);
-            if ((((throttlePercent >= lowThrottleLimit) && areSticksActive(RUNAWAY_TAKEOFF_DEACTIVATE_STICK_PERCENT)) || (throttlePercent >= midThrottleLimit))
+            if ((((throttlePercent >= lowThrottleLimit) && (areSticksActive(RUNAWAY_TAKEOFF_DEACTIVATE_STICK_PERCENT)
+#ifdef USE_EXTERNAL_CONTROL
+                    || externalControlActive
+#endif
+                    )) || (throttlePercent >= midThrottleLimit))
                 && (fabsf(pidData[FD_PITCH].Sum) < RUNAWAY_TAKEOFF_DEACTIVATE_PIDSUM_LIMIT)
                 && (fabsf(pidData[FD_ROLL].Sum) < RUNAWAY_TAKEOFF_DEACTIVATE_PIDSUM_LIMIT)
                 && (fabsf(pidData[FD_YAW].Sum) < RUNAWAY_TAKEOFF_DEACTIVATE_PIDSUM_LIMIT)) {
@@ -977,6 +1011,9 @@ void processRxModes(timeUs_t currentTimeUs)
         && !isFixedWing()
         && !featureIsEnabled(FEATURE_3D)
         && !isAirmodeEnabled()
+#ifdef USE_EXTERNAL_CONTROL
+        && !externalControlIsActive()
+#endif
         && !FLIGHT_MODE(GPS_RESCUE_MODE)  // disable auto-disarm when GPS Rescue is active
         && !flightPlanNavIsRescuePlanActive()  // ... or a plan rescue / fallback descent is flying
         && !flightPlanNavIsRescueDescentActive()
@@ -1029,6 +1066,30 @@ void processRxModes(timeUs_t currentTimeUs)
 
     updateActivatedModes();
 
+#ifdef USE_EXTERNAL_CONTROL
+    // External control is multicopter attitude control only. Navigation,
+    // failsafe, crash-flip, launch-control, 3D, or an invalid pilot link all
+    // deny authority and latch the stick-controlled Angle fallback.
+    const bool externalControlPermitted =
+        sensors(SENSOR_ACC)
+        && rxAreFlightChannelsValid()
+        && !failsafeIsActive()
+        && !FLIGHT_MODE(FAILSAFE_MODE | GPS_RESCUE_MODE | AUTOPILOT_MODE | ALT_HOLD_MODE | POS_HOLD_MODE)
+        && !IS_RC_MODE_ACTIVE(BOXFAILSAFE)
+        && !IS_RC_MODE_ACTIVE(BOXGPSRESCUE)
+        && !IS_RC_MODE_ACTIVE(BOXAUTOPILOT)
+        && !IS_RC_MODE_ACTIVE(BOXALTHOLD)
+        && !IS_RC_MODE_ACTIVE(BOXPOSHOLD)
+        && !IS_RC_MODE_ACTIVE(BOXCRASHFLIP)
+        && !IS_RC_MODE_ACTIVE(BOXLAUNCHCONTROL)
+#ifdef USE_CHIRP
+        && !IS_RC_MODE_ACTIVE(BOXCHIRP)
+#endif
+        && !featureIsEnabled(FEATURE_3D)
+        && !isFixedWing();
+    externalControlUpdateMode(IS_RC_MODE_ACTIVE(BOXEXTERNALCONTROL), externalControlPermitted, currentTimeUs);
+#endif
+
 #ifdef USE_DSHOT
     if (crashFlipModeActive) {
         beeper(BEEPER_CRASHFLIP_MODE);
@@ -1042,6 +1103,9 @@ void processRxModes(timeUs_t currentTimeUs)
     bool canUseHorizonMode = true;
     if ((IS_RC_MODE_ACTIVE(BOXANGLE)
         || failsafeIsActive()
+#ifdef USE_EXTERNAL_CONTROL
+        || externalControlIsAngleFallbackActive()
+#endif
 #ifdef USE_ALTITUDE_HOLD
         || FLIGHT_MODE(ALT_HOLD_MODE)
 #endif
@@ -1326,7 +1390,11 @@ static FAST_CODE_NOINLINE void subTaskPidController(timeUs_t currentTimeUs)
         && !runawayTakeoffTemporarilyDisabled
         && !FLIGHT_MODE(GPS_RESCUE_MODE)   // disable Runaway Takeoff triggering if GPS Rescue is active
         // check that motors are running
-        && (!featureIsEnabled(FEATURE_MOTOR_STOP) || isAirmodeEnabled() || (calculateThrottleStatus() != THROTTLE_LOW))) {
+        && (!featureIsEnabled(FEATURE_MOTOR_STOP) || isAirmodeEnabled() || (calculateThrottleStatus() != THROTTLE_LOW)
+#ifdef USE_EXTERNAL_CONTROL
+            || externalControlIsActive()
+#endif
+            )) {
 
         if (((fabsf(pidData[FD_PITCH].Sum) >= RUNAWAY_TAKEOFF_PIDSUM_THRESHOLD)
             || (fabsf(pidData[FD_ROLL].Sum) >= RUNAWAY_TAKEOFF_PIDSUM_THRESHOLD)

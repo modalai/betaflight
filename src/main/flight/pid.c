@@ -625,7 +625,11 @@ STATIC_UNIT_TESTED FAST_CODE_NOINLINE float pidLevel(int axis, const pidProfile_
     // this filter runs at ATTITUDE_CUTOFF_HZ, currently 50hz, so GPS roll may be a bit steppy
     angleRate = pt3FilterApply(&pidRuntime.attitudeFilter[axis], angleRate);
 
-    if (FLIGHT_MODE(ANGLE_MODE| GPS_RESCUE_MODE | POS_HOLD_MODE)) {
+    if (FLIGHT_MODE(ANGLE_MODE| GPS_RESCUE_MODE | POS_HOLD_MODE)
+#ifdef USE_EXTERNAL_CONTROL
+        || externalControlIsAngleFallbackActive()
+#endif
+        ) {
         currentPidSetpoint = angleRate;
     } else {
         // can only be HORIZON mode - crossfade Angle rate and Acro rate
@@ -883,10 +887,17 @@ STATIC_UNIT_TESTED void applyItermRelax(const int axis, const float iterm,
 
 static FAST_CODE_NOINLINE void disarmOnImpact(void)
 {
+    float controlThrottle = mixerGetRcThrottle();
+#ifdef USE_EXTERNAL_CONTROL
+    if (externalControlIsActive()) {
+        controlThrottle = mixerGetThrottle();
+    }
+#endif
+
     // if, being armed, and after takeoff...
     if (wasThrottleRaised()
         // and, either sticks are centred and throttle zeroed,
-        && ((getMaxRcDeflectionAbs() < 0.05f && mixerGetRcThrottle() < 0.05f)
+        && ((getMaxRcDeflectionAbs() < 0.05f && controlThrottle < 0.05f)
 #ifdef USE_ALTITUDE_HOLD
             // or, in altitude hold mode, where throttle can be non-zero
             || FLIGHT_MODE(ALT_HOLD_MODE | GPS_RESCUE_MODE)
@@ -1054,9 +1065,16 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
     static float previousRawGyroRateDterm[XYZ_AXIS_COUNT];
 
 #ifdef USE_EXTERNAL_CONTROL
-    // Passive phase only: calculate and log the command that a future gated
-    // integration would consume. Do not alter RC or PID setpoints here.
     externalControlUpdateShadowCommand(currentTimeUs);
+    externalControlShadowCommand_t externalCommand;
+    const bool externalControlActive = externalControlGetActiveCommand(&externalCommand);
+    static bool externalControlPreviouslyActive;
+    if (externalControlActive != externalControlPreviouslyActive) {
+        // Do not carry an integrator accumulated under one authority source
+        // across either side of the handoff.
+        pidResetIterm();
+        externalControlPreviouslyActive = externalControlActive;
+    }
 #endif
 
     calculateSpaValues(pidProfile);
@@ -1080,9 +1098,21 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
 #ifdef USE_POSITION_HOLD
                 || FLIGHT_MODE(POS_HOLD_MODE)
 #endif
+#ifdef USE_EXTERNAL_CONTROL
+                || externalControlIsAngleFallbackActive()
+#endif
                 ;
     levelMode_e levelMode;
-    if (FLIGHT_MODE(ANGLE_MODE | HORIZON_MODE | GPS_RESCUE_MODE)) {
+#ifdef USE_EXTERNAL_CONTROL
+    if (externalControlActive) {
+        levelMode = LEVEL_MODE_OFF;
+    } else
+#endif
+    if (FLIGHT_MODE(ANGLE_MODE | HORIZON_MODE | GPS_RESCUE_MODE)
+#ifdef USE_EXTERNAL_CONTROL
+        || externalControlIsAngleFallbackActive()
+#endif
+        ) {
         if (pidRuntime.levelRaceMode && !isExternalAngleModeRequest) {
             levelMode = LEVEL_MODE_R;
         } else {
@@ -1196,8 +1226,16 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
         }
 #endif // USE_CHIRP
 
-        float currentPidSetpoint = getSetpointRate(axis);
-        if (pidRuntime.maxVelocity[axis]) {
+        float currentPidSetpoint =
+#ifdef USE_EXTERNAL_CONTROL
+            externalControlActive ? externalCommand.rate[axis] :
+#endif
+            getSetpointRate(axis);
+        if (pidRuntime.maxVelocity[axis]
+#ifdef USE_EXTERNAL_CONTROL
+            && !externalControlActive
+#endif
+            ) {
             currentPidSetpoint = accelerationLimit(axis, currentPidSetpoint);
         }
         // Yaw control is GYRO based, direct sticks control is applied to rate PID
@@ -1231,13 +1269,21 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
         currentPidSetpoint = wingAdjustSetpoint(currentPidSetpoint, axis);
 
 #ifdef USE_ACRO_TRAINER
-        if ((axis != FD_YAW) && pidRuntime.acroTrainerActive && !pidRuntime.inCrashRecoveryMode && !launchControlActive) {
+        if ((axis != FD_YAW) && pidRuntime.acroTrainerActive && !pidRuntime.inCrashRecoveryMode && !launchControlActive
+#ifdef USE_EXTERNAL_CONTROL
+            && !externalControlActive
+#endif
+            ) {
             currentPidSetpoint = applyAcroTrainer(axis, angleTrim, currentPidSetpoint);
         }
 #endif // USE_ACRO_TRAINER
 
 #ifdef USE_LAUNCH_CONTROL
-        if (launchControlActive) {
+        if (launchControlActive
+#ifdef USE_EXTERNAL_CONTROL
+            && !externalControlActive
+#endif
+            ) {
 #if defined(USE_ACC)
             currentPidSetpoint = applyLaunchControl(axis, angleTrim);
 #else
@@ -1257,7 +1303,13 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
         // -----calculate error rate
         const float gyroRate = gyro.gyroADCf[axis]; // Process variable from gyro output in deg/sec
 #ifdef USE_CHIRP
-        currentPidSetpoint += currentChirp;
+        if (
+#ifdef USE_EXTERNAL_CONTROL
+            !externalControlActive &&
+#endif
+            FLIGHT_MODE(CHIRP_MODE)) {
+            currentPidSetpoint += currentChirp;
+        }
 #endif // USE_CHIRP
         float errorRate = currentPidSetpoint - gyroRate; // r - y
 #if defined(USE_ACC)
@@ -1318,7 +1370,11 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
         float pidSetpointDelta = 0;
 
 #if defined(USE_FEEDFORWARD) && defined(USE_ACC)
-        if (FLIGHT_MODE(ANGLE_MODE) && pidRuntime.axisInAngleMode[axis]) {
+        if (
+#ifdef USE_EXTERNAL_CONTROL
+            externalControlActive ||
+#endif
+            (FLIGHT_MODE(ANGLE_MODE) && pidRuntime.axisInAngleMode[axis])) {
             // this axis is fully under self-levelling control
             // it will already have stick based feedforward applied in the input to their angle setpoint
             // a simple setpoint Delta can be used to for PID feedforward element for motor lag on these axes
