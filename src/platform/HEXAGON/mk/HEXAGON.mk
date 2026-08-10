@@ -9,6 +9,24 @@ CROSS_CC  := $(CCACHE) hexagon-clang
 CROSS_CXX := $(CCACHE) hexagon-clang++
 SIZE      := hexagon-size
 
+# Keep the upstream Betaflight version unchanged while publishing the HEXAGON
+# fork version through Betaflight's existing BUILD_KEY and RELEASE_NAME fields.
+# A Docker/CI build without .git can supply FORK_VERSION explicitly.
+HEXAGON_FC_VERSION := $(call pp_def_value_str,src/main/build/version.h,FC_VERSION_STRING)
+ifndef FORK_VERSION
+FORK_VERSION := $(shell git describe --tags --match '$(HEXAGON_FC_VERSION)-[0-9]*' --abbrev=9 --dirty 2>/dev/null)
+ifeq ($(strip $(FORK_VERSION)),)
+FORK_VERSION := $(HEXAGON_FC_VERSION)-unknown
+endif
+ifneq ($(strip $(shell git status --porcelain --untracked-files=normal 2>/dev/null)),)
+FORK_VERSION := $(patsubst %-dirty,%,$(FORK_VERSION))-dirty
+endif
+endif
+ifeq ($(strip $(FORK_VERSION)),)
+FORK_VERSION := $(HEXAGON_FC_VERSION)-unknown
+endif
+TARGET_FLAGS += -DBUILD_KEY=HEXAGON -DRELEASE_NAME=$(FORK_VERSION)
+
 # Hexagon clang does not support the GCC-only loop warning or GCC LTO flags.
 LTO := no
 CFLAGS_DISABLED += -Wunsafe-loop-optimizations
