@@ -1,0 +1,4 @@
+When returning, say:
+
+  > Read AGENTS.md and the external-control handoff, inspect the current branch, and resume from the documented status.
+
