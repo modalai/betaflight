@@ -2,6 +2,10 @@
 
 Companion scripts for the Betaflight DSP build on VOXL.
 
+Development status, design decisions, completed validation, and resume notes
+for the external thrust/attitude controller are in
+[EXTERNAL_CONTROL_HANDOFF.md](EXTERNAL_CONTROL_HANDOFF.md).
+
 The flight controller runs as `betaflight.so` on the Hexagon DSP (SLPI). It can't open sockets directly, so a small Python process on the application processor speaks to it over the SLPI link (`libslpi_link.so.1`) and re-exposes its serial UARTs as network endpoints:
 
 - **MSP** (Configurator) → WebSocket on `0.0.0.0:8765`
