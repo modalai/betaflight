@@ -1,0 +1,634 @@
+#!/usr/bin/env python3
+
+"""Command-line access to the HEXAGON Betaflight CLI over its MSP WebSocket."""
+
+import asyncio
+import os
+import shutil
+import subprocess
+import sys
+import termios
+import tty
+
+
+DEFAULT_URL = "ws://127.0.0.1:8765"
+DEFAULT_TIMEOUT_SECONDS = 10.0
+CALIBRATION_TIMEOUT_SECONDS = 30.0
+STX = b"\x02"
+ETX = b"\x03"
+CLI_PROMPT = b"\r\n# "
+REBOOT_MARKER = b"\r\nRebooting"
+NO_REBOOT_MARKER = b"leaving CLI mode, no reboot"
+ERROR_MARKERS = (b"###ERROR", b"ERR_CMD_NA:")
+
+MSP_STATUS = 101
+MSP_ACC_CALIBRATION = 205
+MSP_DIRECTION_REPLY = ord(">")
+MSP_DIRECTION_ERROR = ord("!")
+MSP_STATUS_ARMED = 1 << 0
+MSP_STATUS_SENSOR_ACC = 1 << 0
+ARMING_DISABLED_CALIBRATING = 1 << 12
+
+USAGE = """\
+Usage:
+  bf-cli                         Enter the interactive Betaflight CLI
+  bf-cli <command> [arguments]   Run one CLI command and exit
+  bf-cli -h | --help             Show this help and exit
+
+bf-cli runs on the VOXL target by default and connects to the local Betaflight
+bridge at ws://127.0.0.1:8765. The bridge must already be running, and
+Betaflight Configurator must be disconnected because only one MSP client can be
+connected at a time.
+
+Interactive CLI:
+  bf-cli
+
+  Opens the standard Betaflight CLI. Type "exit" or press Ctrl-D to save/reboot
+  as requested by the CLI. Interactive mode disables arming once the prompt
+  appears. It does not disarm a vehicle that is already armed.
+
+One command:
+  bf-cli version
+  bf-cli status
+  bf-cli get gyro_lpf1_static_hz
+  bf-cli set gyro_lpf1_static_hz=100
+  bf-cli save
+
+  All arguments are joined with spaces and sent as one Betaflight CLI command.
+  "version" reports both the upstream Betaflight version and this fork's tagged
+  version. This mode exits after printing the response and does not set the CLI
+  arming-disable flag. To see Betaflight's own command list, run:
+
+  bf-cli help
+
+First-time configuration from a shell script:
+  #!/bin/sh
+  set -e
+  bf-cli batch start
+  bf-cli defaults nosave
+  bf-cli set motor_pwm_inversion=ON
+  # Add the remaining vehicle-specific commands here.
+  bf-cli save
+
+  Run the commands sequentially. Shell comments and blank lines need no bf-cli
+  prefix. "set -e" stops the script if bf-cli reports an error. A final "save"
+  stores the settings and reboots Betaflight; allow the bridge to reconnect
+  before issuing another command.
+
+Accelerometer calibration:
+  bf-cli calibrate acc
+
+  Place the disarmed vehicle in its normal flight orientation on a level,
+  vibration-free surface and keep it still. The command refuses to start if the
+  vehicle is armed or no accelerometer is detected, waits for completion, saves
+  the calibration, and prints the resulting offsets. The gyro calibrates
+  automatically during boot, so keep the vehicle still during startup too.
+
+Optional laptop use:
+  BF_CLI_ADB=1 ./bf-cli status
+
+  BF_CLI_ADB creates an adb forward from laptop localhost:8765 to the target.
+  adb and the target must already be available. BF_CLI_URL may instead select
+  another WebSocket endpoint.
+
+Environment:
+  BF_CLI_URL        WebSocket URL (default: ws://127.0.0.1:8765)
+  BF_CLI_ADB        Set to 1/true/yes/on to create the laptop adb forward
+  BF_CLI_TIMEOUT    Connection/response timeout in seconds (default: 10)
+
+Exit status:
+  0                 Command completed successfully
+  1                 Connection, protocol, or Betaflight CLI error
+  2                 Invalid local usage or missing Python websockets package
+  130               Interrupted with Ctrl-C
+
+Safety:
+  Use bf-cli only while the vehicle is disarmed and secured on the bench.
+  Interactive mode prevents subsequent arming, but one-command mode does not.
+  If an interactive connection is lost or "exit noreboot" is used, arming can
+  remain disabled until Betaflight is rebooted.
+"""
+
+
+class BfCliError(Exception):
+    pass
+
+
+def _env_is_true(name):
+    return os.environ.get(name, "").lower() in ("1", "true", "yes", "on")
+
+
+def _get_timeout():
+    value = os.environ.get("BF_CLI_TIMEOUT")
+    if value is None:
+        return DEFAULT_TIMEOUT_SECONDS
+    try:
+        timeout = float(value)
+    except ValueError as exc:
+        raise BfCliError("BF_CLI_TIMEOUT must be a number") from exc
+    if timeout <= 0:
+        raise BfCliError("BF_CLI_TIMEOUT must be greater than zero")
+    return timeout
+
+
+def _prepare_adb_forward():
+    if not _env_is_true("BF_CLI_ADB"):
+        return
+
+    adb = shutil.which("adb")
+    if adb is None:
+        raise BfCliError("BF_CLI_ADB is set, but adb was not found in PATH")
+
+    try:
+        state = subprocess.run(
+            [adb, "get-state"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise BfCliError("timed out waiting for adb") from exc
+
+    if state.returncode != 0 or state.stdout.strip() != "device":
+        detail = state.stderr.strip() or state.stdout.strip() or "no device"
+        raise BfCliError("adb device is not ready: " + detail)
+
+    try:
+        forward = subprocess.run(
+            [adb, "forward", "tcp:8765", "tcp:8765"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise BfCliError("timed out creating the adb port forward") from exc
+
+    if forward.returncode != 0:
+        detail = forward.stderr.strip() or forward.stdout.strip()
+        raise BfCliError("adb forward failed: " + detail)
+
+
+def _message_bytes(message):
+    if not isinstance(message, (bytes, bytearray)):
+        raise BfCliError("bridge returned a non-binary WebSocket message")
+    return bytes(message)
+
+
+def _write_all(fd, data):
+    view = memoryview(data)
+    while view:
+        written = os.write(fd, view)
+        view = view[written:]
+
+
+async def _receive_with_timeout(websocket, timeout, description):
+    try:
+        message = await asyncio.wait_for(websocket.recv(), timeout)
+    except asyncio.TimeoutError as exc:
+        raise BfCliError("timed out waiting for " + description) from exc
+    return _message_bytes(message)
+
+
+async def _wait_for_byte(websocket, wanted, timeout, description):
+    buffered = bytearray()
+    deadline = asyncio.get_running_loop().time() + timeout
+
+    while True:
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            raise BfCliError("timed out waiting for " + description)
+        buffered.extend(
+            await _receive_with_timeout(websocket, remaining, description)
+        )
+        index = buffered.find(wanted)
+        if index >= 0:
+            return bytes(buffered[index + len(wanted):])
+
+
+def _msp_v1_request(command, payload=b""):
+    if not 0 <= command <= 0xff:
+        raise BfCliError("MSP v1 command is out of range")
+    if len(payload) > 0xff:
+        raise BfCliError("MSP v1 payload is too large")
+
+    body = bytes((len(payload), command)) + payload
+    checksum = 0
+    for value in body:
+        checksum ^= value
+    return b"$M<" + body + bytes((checksum,))
+
+
+class MspClient:
+    def __init__(self, websocket, timeout):
+        self.websocket = websocket
+        self.timeout = timeout
+        self.buffer = bytearray()
+
+    def _pop_frame(self):
+        while True:
+            start = self.buffer.find(b"$M")
+            if start < 0:
+                # Preserve a trailing '$' in case the header spans messages.
+                if self.buffer[-1:] == b"$":
+                    self.buffer[:] = b"$"
+                else:
+                    self.buffer.clear()
+                return None
+            if start:
+                del self.buffer[:start]
+            if len(self.buffer) < 6:
+                return None
+
+            direction = self.buffer[2]
+            if direction not in (MSP_DIRECTION_REPLY, MSP_DIRECTION_ERROR):
+                del self.buffer[0]
+                continue
+
+            payload_length = self.buffer[3]
+            frame_length = payload_length + 6
+            if len(self.buffer) < frame_length:
+                return None
+
+            frame = bytes(self.buffer[:frame_length])
+            del self.buffer[:frame_length]
+
+            checksum = 0
+            for value in frame[3:-1]:
+                checksum ^= value
+            if checksum != frame[-1]:
+                continue
+
+            return direction, frame[4], frame[5:-1]
+
+    async def request(self, command, payload=b""):
+        await self.websocket.send(_msp_v1_request(command, payload))
+        deadline = asyncio.get_running_loop().time() + self.timeout
+
+        while True:
+            frame = self._pop_frame()
+            if frame is not None:
+                direction, response_command, response_payload = frame
+                if response_command != command:
+                    continue
+                if direction == MSP_DIRECTION_ERROR:
+                    raise BfCliError(
+                        "Betaflight rejected MSP command {}".format(command)
+                    )
+                return response_payload
+
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                raise BfCliError(
+                    "timed out waiting for MSP command {}".format(command)
+                )
+            self.buffer.extend(
+                await _receive_with_timeout(
+                    self.websocket,
+                    remaining,
+                    "MSP command {} response".format(command),
+                )
+            )
+
+
+def _decode_msp_status(payload):
+    # MSP_STATUS contains six fixed bytes, a 32-bit flight-mode mask, five
+    # profile/load bytes, a variable extension of that mask, then the arming
+    # disable flag count and 32-bit flag value.
+    if len(payload) < 16:
+        raise BfCliError("MSP_STATUS response is too short")
+
+    sensors = int.from_bytes(payload[4:6], byteorder="little")
+    flight_modes = int.from_bytes(payload[6:10], byteorder="little")
+    extra_flight_mode_bytes = payload[15] & 0x0f
+    arming_flags_offset = 16 + extra_flight_mode_bytes
+    if len(payload) < arming_flags_offset + 5:
+        raise BfCliError("MSP_STATUS arming flags are missing")
+    arming_flags = int.from_bytes(
+        payload[arming_flags_offset + 1:arming_flags_offset + 5],
+        byteorder="little",
+    )
+
+    return sensors, flight_modes, arming_flags
+
+
+async def _read_status(msp):
+    return _decode_msp_status(await msp.request(MSP_STATUS))
+
+
+async def _wait_until_not_calibrating(msp, deadline, description):
+    while True:
+        sensors, flight_modes, arming_flags = await _read_status(msp)
+        if flight_modes & MSP_STATUS_ARMED:
+            raise BfCliError("vehicle armed while " + description)
+        if not (sensors & MSP_STATUS_SENSOR_ACC):
+            raise BfCliError("accelerometer is not detected")
+        if not (arming_flags & ARMING_DISABLED_CALIBRATING):
+            return
+        if asyncio.get_running_loop().time() >= deadline:
+            raise BfCliError("timed out " + description)
+        await asyncio.sleep(0.05)
+
+
+async def _calibrate_accelerometer(websocket, timeout):
+    msp = MspClient(websocket, timeout)
+    deadline = asyncio.get_running_loop().time() + CALIBRATION_TIMEOUT_SECONDS
+    sensors, flight_modes, arming_flags = await _read_status(msp)
+
+    if flight_modes & MSP_STATUS_ARMED:
+        raise BfCliError("refusing to calibrate: vehicle is armed")
+    if not (sensors & MSP_STATUS_SENSOR_ACC):
+        raise BfCliError("accelerometer is not detected")
+    if arming_flags & ARMING_DISABLED_CALIBRATING:
+        print(
+            "bf-cli: waiting for the current sensor calibration to finish...",
+            file=sys.stderr,
+        )
+        await _wait_until_not_calibrating(
+            msp,
+            deadline,
+            "waiting for the current sensor calibration",
+        )
+
+    print(
+        "bf-cli: keep the disarmed vehicle level and completely still; "
+        "calibrating accelerometer...",
+        file=sys.stderr,
+    )
+    await msp.request(MSP_ACC_CALIBRATION)
+    deadline = asyncio.get_running_loop().time() + CALIBRATION_TIMEOUT_SECONDS
+
+    # Wait until the scheduler has observed the newly-started calibration.
+    saw_calibrating = False
+    while True:
+        sensors, flight_modes, arming_flags = await _read_status(msp)
+        if flight_modes & MSP_STATUS_ARMED:
+            raise BfCliError("vehicle armed during accelerometer calibration")
+        if not (sensors & MSP_STATUS_SENSOR_ACC):
+            raise BfCliError("accelerometer was lost during calibration")
+
+        if arming_flags & ARMING_DISABLED_CALIBRATING:
+            saw_calibrating = True
+        elif saw_calibrating:
+            break
+
+        if asyncio.get_running_loop().time() >= deadline:
+            raise BfCliError("timed out waiting for accelerometer calibration")
+        await asyncio.sleep(0.05)
+
+    print(
+        "bf-cli: accelerometer calibration complete and saved; stored value:",
+        file=sys.stderr,
+    )
+    return await _run_command(websocket, "get acc_calibration", timeout)
+
+
+async def _run_version(websocket, timeout):
+    result = await _run_command(websocket, "version", timeout)
+    if result:
+        return result
+    return await _run_command(websocket, "env RELEASE_NAME", timeout)
+
+
+def _output_has_error(output):
+    return any(marker in output for marker in ERROR_MARKERS)
+
+
+async def _run_command(websocket, command, timeout):
+    try:
+        encoded_command = command.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise BfCliError("CLI commands must contain ASCII characters only") from exc
+
+    await websocket.send(STX)
+    remainder = await _wait_for_byte(
+        websocket,
+        STX,
+        timeout,
+        "the CLI command-mode acknowledgement",
+    )
+
+    # The command and terminator are sent together so the firmware's short
+    # command-mode timeout cannot strand it in CLI mode between writes.
+    await websocket.send(encoded_command + b"\r" + ETX)
+
+    output = bytearray()
+    pending = remainder
+    deadline = asyncio.get_running_loop().time() + timeout
+
+    while True:
+        if not pending:
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                raise BfCliError("timed out waiting for the CLI command response")
+            pending = await _receive_with_timeout(
+                websocket,
+                remaining,
+                "the CLI command response",
+            )
+
+        end_index = pending.find(ETX)
+        if end_index >= 0:
+            chunk = pending[:end_index]
+            if chunk:
+                _write_all(sys.stdout.fileno(), chunk)
+                output.extend(chunk)
+            return 1 if _output_has_error(output) else 0
+
+        _write_all(sys.stdout.fileno(), pending)
+        output.extend(pending)
+        if REBOOT_MARKER in output:
+            # Rebooting commands can reset the DSP before it returns ETX.
+            return 1 if _output_has_error(output) else 0
+        pending = b""
+
+
+async def _wait_for_interactive_prompt(websocket, timeout):
+    tail = b""
+    deadline = asyncio.get_running_loop().time() + timeout
+
+    while True:
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            raise BfCliError("timed out waiting for the interactive CLI prompt")
+        data = await _receive_with_timeout(
+            websocket,
+            remaining,
+            "the interactive CLI prompt",
+        )
+        _write_all(sys.stdout.fileno(), data)
+        tail = (tail + data)[-256:]
+        if CLI_PROMPT in tail:
+            return
+
+
+async def _relay_interactive(websocket):
+    stdin_fd = sys.stdin.fileno()
+    stdout_fd = sys.stdout.fileno()
+    loop = asyncio.get_running_loop()
+    input_queue = asyncio.Queue()
+    old_terminal = termios.tcgetattr(stdin_fd)
+
+    def stdin_ready():
+        try:
+            data = os.read(stdin_fd, 1024)
+        except OSError:
+            data = b""
+        input_queue.put_nowait(data)
+
+    async def send_input():
+        while True:
+            data = await input_queue.get()
+            if not data:
+                return "stdin-eof"
+            await websocket.send(data)
+
+    async def receive_output():
+        tail = b""
+        try:
+            while True:
+                data = _message_bytes(await websocket.recv())
+                _write_all(stdout_fd, data)
+                tail = (tail + data)[-256:]
+                if REBOOT_MARKER in tail:
+                    return "reboot"
+                if NO_REBOOT_MARKER in tail:
+                    return "exit-noreboot"
+        except Exception as exc:
+            # Preserve cancellation, but turn a closed socket into a useful
+            # relay result. Other WebSocket errors are reported by the caller.
+            if isinstance(exc, asyncio.CancelledError):
+                raise
+            if exc.__class__.__name__.startswith("ConnectionClosed"):
+                return "connection-closed"
+            raise
+
+    try:
+        tty.setcbreak(stdin_fd)
+        loop.add_reader(stdin_fd, stdin_ready)
+        sender = asyncio.create_task(send_input())
+        receiver = asyncio.create_task(receive_output())
+        done, pending = await asyncio.wait(
+            (sender, receiver),
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        return next(iter(done)).result()
+    finally:
+        loop.remove_reader(stdin_fd)
+        termios.tcsetattr(stdin_fd, termios.TCSADRAIN, old_terminal)
+
+
+async def _run_interactive(websocket, timeout):
+    if not sys.stdin.isatty():
+        raise BfCliError("interactive mode requires a terminal on stdin")
+
+    print(
+        "bf-cli: ensure the vehicle is disarmed; entering CLI mode...",
+        file=sys.stderr,
+    )
+    # '#\r' is deliberately sent before terminal input is enabled. Betaflight
+    # requires a 100 ms quiet period before entering interactive CLI mode, and
+    # bytes typed during that guard period would otherwise be discarded.
+    await websocket.send(b"#\r")
+    await _wait_for_interactive_prompt(websocket, timeout)
+    print(
+        "bf-cli: CLI active; arming is disabled. Type 'exit' or Ctrl-D to reboot.",
+        file=sys.stderr,
+    )
+    result = await _relay_interactive(websocket)
+
+    if result == "exit-noreboot":
+        print(
+            "\nbf-cli: CLI exited without reboot; arming remains disabled until reboot.",
+            file=sys.stderr,
+        )
+    elif result in ("stdin-eof", "connection-closed"):
+        print(
+            "\nbf-cli: connection ended; Betaflight may still be in CLI mode with "
+            "arming disabled.",
+            file=sys.stderr,
+        )
+    return 0
+
+
+async def _run(websockets, url, command, timeout):
+    try:
+        async with websockets.connect(
+            url,
+            subprotocols=["binary"],
+            max_size=None,
+            open_timeout=timeout,
+            close_timeout=1,
+        ) as websocket:
+            if command is None:
+                return await _run_interactive(websocket, timeout)
+            if command.lower() == "version":
+                return await _run_version(websocket, timeout)
+            if command.lower() in ("calibrate acc", "calibrate accelerometer"):
+                return await _calibrate_accelerometer(websocket, timeout)
+            if (
+                command.lower() == "calibrate"
+                or command.lower().startswith("calibrate ")
+            ):
+                raise BfCliError(
+                    "unsupported calibration; use 'bf-cli calibrate acc'"
+                )
+            return await _run_command(websocket, command, timeout)
+    except BfCliError:
+        raise
+    except asyncio.TimeoutError as exc:
+        raise BfCliError("timed out connecting to " + url) from exc
+    except OSError as exc:
+        raise BfCliError(
+            "could not connect to {}: {}. Is the on-device betaflight bridge "
+            "running?".format(url, exc)
+        ) from exc
+
+
+def main():
+    args = sys.argv[1:]
+    if args in (["-h"], ["--help"]):
+        print(USAGE, end="")
+        return 0
+
+    command = " ".join(args) if args else None
+    if command == "":
+        print("bf-cli: command must not be empty", file=sys.stderr)
+        return 2
+
+    try:
+        import websockets
+    except ImportError:
+        print(
+            "bf-cli: Python package 'websockets' is required "
+            "(install python3-websockets or pip install websockets)",
+            file=sys.stderr,
+        )
+        return 2
+
+    url = os.environ.get("BF_CLI_URL", DEFAULT_URL)
+    try:
+        timeout = _get_timeout()
+        _prepare_adb_forward()
+        return asyncio.run(_run(websockets, url, command, timeout))
+    except KeyboardInterrupt:
+        print(
+            "\nbf-cli: interrupted; Betaflight may still be in CLI mode with "
+            "arming disabled.",
+            file=sys.stderr,
+        )
+        return 130
+    except BfCliError as exc:
+        print("bf-cli: " + str(exc), file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print("bf-cli: " + str(exc), file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
