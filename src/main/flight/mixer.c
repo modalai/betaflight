@@ -682,6 +682,10 @@ FAST_CODE_NOINLINE void mixTable(timeUs_t currentTimeUs)
 #ifdef USE_EXTERNAL_CONTROL
     externalControlShadowCommand_t externalCommand;
     const bool externalControlActive = externalControlGetActiveCommand(&externalCommand);
+#if defined(USE_THROTTLE_BOOST)
+    static bool externalControlPreviouslyActive;
+    const bool externalControlSourceChanged = externalControlActive != externalControlPreviouslyActive;
+#endif
 #endif
     const bool airmodeEnabled = isAirmodeEnabled() || launchControlActive
 #ifdef USE_EXTERNAL_CONTROL
@@ -754,6 +758,15 @@ FAST_CODE_NOINLINE void mixTable(timeUs_t currentTimeUs)
 
     // apply throttle boost when throttle moves quickly
 #if defined(USE_THROTTLE_BOOST)
+#ifdef USE_EXTERNAL_CONTROL
+    if (externalControlSourceChanged) {
+        // A change of authority is not a throttle transient. Seed the boost
+        // filter from the newly selected source so the handoff itself cannot
+        // create a synthetic throttle pulse.
+        throttleLpf.state = throttle;
+        externalControlPreviouslyActive = externalControlActive;
+    }
+#endif
     if (throttleBoost > 0.0f
 #ifdef USE_EXTERNAL_CONTROL
         && !externalControlActive

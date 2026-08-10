@@ -186,9 +186,10 @@ returns to `13`, while command thrust, rates, and errors all become zero.
 authority active, its rate outputs replace the RC rate setpoints and its
 normalized thrust replaces RC throttle at the mixer input. Configured throttle
 limits and the normal motor-output safety path still apply; throttle boost is
-not applied to external thrust. Betaflight's standard Blackbox setpoint and
-mixer-throttle fields therefore record the commands that actually reached
-these paths.
+not applied to external thrust, and its filter is reseeded when authority
+changes so it cannot amplify the handoff. Betaflight's standard Blackbox
+setpoint and mixer-throttle fields therefore record the commands that actually
+reached these paths.
 
 ## External-control authority and fallback
 
@@ -215,7 +216,9 @@ stick becomes the immediate throttle command if fallback occurs.
 ### First active-path test
 
 Remove all propellers and select `EXT_CTRL_CMD` as the debug mode. Assign the
-new mode to an AUX switch, leave it deselected, and run a conservative loopback:
+new mode to an AUX switch, leave it deselected, and ensure the ordinary
+`ANGLE` mode is also deselected so it cannot mask fallback activation. Then run
+a conservative loopback:
 
 ```sh
 python3 bf_external_control_loopback.py --rate-hz 20 --thrust 0.10
@@ -239,9 +242,10 @@ all propellers removed. Run the same zero-offset, 0.10-thrust loopback; arm with
 `EXTERNAL CTRL` off, then select it and verify that the logged mixer throttle is
 about 0.10, adjusted only if a throttle limit is configured. Stop the loopback
 and confirm that control returns to Angle mode and RC throttle after 200 ms. Be
-ready to disarm throughout. Review the
-Blackbox setpoint, gyro, PID, mixer-throttle, motor, and `EXT_CTRL_CMD` fields
-before considering any test with propellers.
+ready to disarm throughout. At the handoff, mixer throttle should move directly
+to the current RC-throttle value without an additional throttle-boost pulse.
+Review the Blackbox setpoint, gyro, PID, mixer-throttle, motor, and
+`EXT_CTRL_CMD` fields before considering any test with propellers.
 
 Select one mode before a log, for example:
 
